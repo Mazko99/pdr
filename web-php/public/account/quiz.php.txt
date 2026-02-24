@@ -21,6 +21,10 @@ require __DIR__ . '/../../src/bootstrap.php';
  *   ✅ Піднято робочу зону + автоскрол вгору на кожне питання
  *
  *   ✅ NEW: Save "Складено" not only for tests, but also for exam/trainer (passed_items)
+ *
+ *   ✅ NEW (24.02): FIX mobile text visibility:
+ *      - options text visible (pp-opt)
+ *      - circle numbers visible (pp-dot)
  */
 
 function h(string $s): string { return htmlspecialchars($s, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); }
@@ -773,24 +777,59 @@ $topic = (string)($quiz['topic'] ?? '');
         .pp-q{font-size:18px;font-weight:800;margin:12px 0}
         .pp-img{margin:10px 0}
         .pp-img img{max-width:100%;height:auto;border-radius:14px;display:block;border:1px solid rgba(12,32,22,.08)}
-        .pp-opt{display:block;width:100%;text-align:left;border:1px solid rgba(12,32,22,.10);background:#fff;border-radius:14px;padding:12px 12px;margin:10px 0;cursor:pointer;font-weight:700}
+
+        /* ✅ FIX: force visible text color on options (mobile inherits white from global css) */
+        .pp-opt{
+            display:block;width:100%;text-align:left;
+            border:1px solid rgba(12,32,22,.10);
+            background:#fff;
+            border-radius:14px;
+            padding:12px 12px;
+            margin:10px 0;
+            cursor:pointer;
+            font-weight:700;
+            color:#0b1b14;              /* ✅ important */
+            -webkit-text-fill-color:#0b1b14; /* ✅ iOS/Safari fallback */
+        }
         .pp-opt:hover{background:rgba(11,27,20,.03)}
         .pp-opt[disabled]{cursor:default;opacity:1}
-        .pp-opt.is-correct{border-color:rgba(10,122,61,.35);background:rgba(10,122,61,.08)}
-        .pp-opt.is-wrong{border-color:rgba(180,35,24,.35);background:rgba(180,35,24,.08)}
+
+        /* keep readable text on colored states too */
+        .pp-opt.is-correct{
+            border-color:rgba(10,122,61,.35);
+            background:rgba(10,122,61,.08);
+            color:#0b1b14;
+            -webkit-text-fill-color:#0b1b14;
+        }
+        .pp-opt.is-wrong{
+            border-color:rgba(180,35,24,.35);
+            background:rgba(180,35,24,.08);
+            color:#0b1b14;
+            -webkit-text-fill-color:#0b1b14;
+        }
+
         .pp-explain{margin-top:12px;border-radius:14px;border:1px solid rgba(12,32,22,.10);background:rgba(11,27,20,.02);padding:12px}
         .pp-explain__t{font-weight:900;margin-bottom:6px}
         .pp-explain__b{opacity:.9;font-weight:650;line-height:1.45}
 
         /* --- Top progress row (circles + arrows) --- */
         .pp-progress{display:flex;align-items:center;gap:10px;margin-bottom:12px}
-        .pp-navbtn{width:44px;height:44px;border-radius:999px;border:1px solid rgba(12,32,22,.10);background:rgba(11,27,20,.03);display:flex;align-items:center;justify-content:center;font-weight:900}
+        .pp-navbtn{
+            width:44px;height:44px;border-radius:999px;
+            border:1px solid rgba(12,32,22,.10);
+            background:rgba(11,27,20,.03);
+            display:flex;align-items:center;justify-content:center;
+            font-weight:900;
+            color:#0b1b14;              /* ✅ make arrows visible too */
+            -webkit-text-fill-color:#0b1b14;
+        }
         .pp-navbtn:hover{background:rgba(11,27,20,.06)}
         .pp-strip{flex:1;overflow:hidden}
         .pp-strip__inner{display:flex;gap:10px;overflow-x:auto;scroll-behavior:smooth;padding:6px 2px}
         .pp-strip__inner::-webkit-scrollbar{height:8px}
         .pp-strip__inner::-webkit-scrollbar-thumb{background:rgba(11,27,20,.12);border-radius:99px}
 
+        /* ✅ FIX: force visible numbers inside circles */
         .pp-dot{
             width:34px;height:34px;border-radius:999px;
             border:1px solid rgba(12,32,22,.16);
@@ -798,6 +837,8 @@ $topic = (string)($quiz['topic'] ?? '');
             display:flex;align-items:center;justify-content:center;
             font-weight:900;
             user-select:none;
+            color:#0b1b14;              /* ✅ important */
+            -webkit-text-fill-color:#0b1b14; /* ✅ iOS/Safari fallback */
         }
         .pp-dot.is-current{outline:2px solid rgba(10,122,61,.25);outline-offset:2px}
         .pp-dot.is-ok{border-color:rgba(10,122,61,.35);background:rgba(10,122,61,.10)}
@@ -818,6 +859,8 @@ $topic = (string)($quiz['topic'] ?? '');
         .pp-pill{
             background:#fff;border:1px solid rgba(12,32,22,.10);
             border-radius:999px;padding:8px 12px;font-weight:900;
+            color:#0b1b14;              /* ✅ visible text on mobile */
+            -webkit-text-fill-color:#0b1b14;
         }
         .pp-pill small{opacity:.7;font-weight:800}
         .pp-btn{display:inline-flex;align-items:center;justify-content:center;padding:12px 14px;border-radius:14px;background:#0b1b14;color:#fff;text-decoration:none;border:none;font-weight:900}

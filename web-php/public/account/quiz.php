@@ -5,15 +5,26 @@ require __DIR__ . '/../../src/bootstrap.php';
 
 /**
  * ProstoPDR / public/account/quiz.php
- * JSON: public/data/questions_export.json, public/data/tests_export.json
+ * - JSON source of truth: public/data/questions_export.json
+ * - Tests: public/data/tests_export.json
+ * - Session schema: per your context
+ * - FIXES:
+ *   ✅ CSRF (bootstrap expects token param)
+ *   ✅ Timer ticks every second (mm:ss)
+ *   ✅ 3 mistakes => auto finish
+ *   ✅ Correct option green, wrong red + show explain
+ *   ✅ Circles are clickable + moved to top on mobile, single-row scroll w/ arrows
+ *   ✅ Remove "джерело істини" text
+ *   ✅ Save per-user progress: passed tests + aggregated mistakes for "work on mistakes"
+ *   ✅ НЕ перелистує автоматом після відповіді (перехід тільки кнопкою "Далі")
+ *   ✅ Нижня панель fixed + не перекриває пояснення
+ *   ✅ Піднято робочу зону + автоскрол вгору на кожне питання
  *
- * FIXES / ADD:
- * ✅ exam_topic / exam_mix / trainer_topic / trainer_mix
- * ✅ Exam: 40 questions, 40 minutes, 3 mistakes
- * ✅ Trainer: 40 questions, unlimited time, unlimited mistakes
- * ✅ After answering: DO NOT auto-next (show explain + "Далі")
- * ✅ Cut everything AFTER cutoff topic:
- *    "ДОДАТКОВІ ПИТАННЯ ЩОДО КАТЕГОРІЙ В1, В (БУДОВА І ТЕРМІНИ)"
+ *   ✅ NEW: Save "Складено" not only for tests, but also for exam/trainer (passed_items)
+ *
+ *   ✅ NEW (24.02): FIX mobile text visibility:
+ *      - options text visible (pp-opt)
+ *      - circle numbers visible (pp-dot)
  */
 
 function h(string $s): string { return htmlspecialchars($s, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); }
@@ -43,6 +54,7 @@ function questions_map(array $questions): array {
         $id = (int)$q['id'];
         if ($id <= 0) continue;
 
+        // Required keys
         if (!isset($q['question']) || !is_string($q['question']) || trim($q['question']) === '') continue;
         if (!isset($q['options']) || !is_array($q['options']) || count($q['options']) < 2) continue;
         if (!isset($q['correct'])) continue;
@@ -54,6 +66,7 @@ function questions_map(array $questions): array {
         if (!array_key_exists('image', $q)) $q['image'] = null;
         if ($q['image'] === '') $q['image'] = null;
 
+        // Normalize options to strings
         $opts = [];
         foreach ($q['options'] as $o) $opts[] = is_string($o) ? $o : (string)$o;
         $q['options'] = $opts;
@@ -133,7 +146,8 @@ function quiz_abort(string $title, array $debug = []): void {
 
 /** -------- Progress store (JSON, no SQL) -------- */
 function progress_path(): string {
-    return dirname(__DIR__, 2) . '/storage/progress.json'; // web-php/storage/progress.json
+    $p = dirname(__DIR__, 2) . '/storage/progress.json'; // web-php/storage/progress.json
+    return $p;
 }
 
 function progress_load(): array {
@@ -166,9 +180,9 @@ function progress_user_get(string $uid): array {
     $u = $data['users'][$uid] ?? null;
     if (!is_array($u)) {
         $u = [
-            'passed_tests' => [],  // [test_id => true]
-            'passed_items' => [],  // ✅ NEW: [key => ['title' => string, 'at' => ISO8601]]
-            'mistakes' => [],      // [test_id => [qid...]]
+            'passed_tests' => [], // [test_id => true]
+            'passed_items' => [], // ✅ NEW: [key => ['title'=>..., 'at'=>...]]
+            'mistakes' => [],     // [test_id => [qid...]]
             'updated_at' => date('c'),
         ];
     }
@@ -211,7 +225,7 @@ function progress_mark_passed(string $uid, int $testId): void {
     progress_user_set($uid, $u);
 }
 
-
+/** ✅ NEW: mark passed for non-test modes (exam/trainer etc.) */
 function progress_mark_passed_item(string $uid, string $key, string $title): void {
     $u = progress_user_get($uid);
     $u['passed_items'][$key] = [
@@ -220,20 +234,6 @@ function progress_mark_passed_item(string $uid, string $key, string $title): voi
     ];
     progress_user_set($uid, $u);
 }
-
-function passed_item_key(array $quiz): string {
-    $mode = (string)($quiz['mode'] ?? 'unknown');
-    $topic = (string)($quiz['topic'] ?? '');
-    $topicReq = (string)($quiz['topic_req'] ?? '');
-    $part = (int)($quiz['part'] ?? 1);
-    $seed = (string)($quiz['seed'] ?? '');
-    $mist = !empty($quiz['mistakes_only']) ? 'mistakes' : 'all';
-    $testId = (int)($quiz['test_id'] ?? 0);
-
-    // Stable key so we can show "✅ Складено" for exam/trainer attempts
-    return $mode . '|' . $mist . '|topic=' . $topic . '|topic_req=' . $topicReq . '|part=' . $part . '|seed=' . $seed . '|testid=' . $testId;
-}
-
 
 function progress_all_mistakes_ids(string $uid): array {
     $u = progress_user_get($uid);
@@ -257,6 +257,7 @@ if (!$uid) {
     exit;
 }
 
+// Access (keep your existing rule)
 $hasAccess = !empty($_SESSION['has_access']);
 if (!$hasAccess) {
     http_response_code(200);
@@ -308,7 +309,7 @@ if ($qFile === false || $tFile === false) {
 }
 
 try {
-    $qMapFull = questions_map(json_load_array($qFile));
+    $qMap = questions_map(json_load_array($qFile));
 } catch (Throwable $e) {
     quiz_abort('Помилка читання questions_export.json', [
         'error' => $e->getMessage(),
@@ -317,73 +318,13 @@ try {
 }
 
 try {
-    $testsListFull = json_load_array($tFile); // keep order
+    $tMap = tests_map(json_load_array($tFile));
 } catch (Throwable $e) {
     quiz_abort('Помилка читання tests_export.json', [
         'error' => $e->getMessage(),
         'tests_file' => $tFile,
     ]);
 }
-
-/** ===== CUT OFF AFTER TOPIC ===== */
-const CUTOFF_TOPIC = 'ДОДАТКОВІ ПИТАННЯ ЩОДО КАТЕГОРІЙ В1, В (БУДОВА І ТЕРМІНИ)';
-
-/**
- * Keep tests only up to cutoff topic (inclusive) in original order.
- */
-$testsList = [];
-$cutFound = false;
-foreach ($testsListFull as $t) {
-    if (!is_array($t)) continue;
-    $testsList[] = $t;
-    $topic = (string)($t['topic'] ?? '');
-    if ($topic === CUTOFF_TOPIC) {
-        $cutFound = true;
-        break;
-    }
-}
-// if cutoff not found: keep all (safe fallback)
-if (!$cutFound) {
-    $testsList = $testsListFull;
-}
-
-/** Build topic pools from allowed tests (type=test only) */
-$topicPools = [];   // topic => [qids...]
-$allowedQidsSet = []; // qid => true
-
-foreach ($testsList as $t) {
-    if (!is_array($t)) continue;
-    if ((string)($t['type'] ?? 'test') !== 'test') continue;
-
-    $topic = (string)($t['topic'] ?? 'Без теми');
-    $qids = $t['question_ids'] ?? [];
-    if (!is_array($qids)) $qids = [];
-
-    foreach ($qids as $id) {
-        $qid = (int)$id;
-        if ($qid <= 0) continue;
-        $allowedQidsSet[$qid] = true;
-        $topicPools[$topic][$qid] = true;
-    }
-}
-
-/** Filter qMap by allowed question ids (so mix/exam do not include beyond cutoff) */
-$qMap = [];
-foreach ($allowedQidsSet as $qid => $_) {
-    if (isset($qMapFull[$qid])) $qMap[$qid] = $qMapFull[$qid];
-}
-
-// normalize topicPools to sorted arrays
-$topicPoolsOut = [];
-foreach ($topicPools as $topic => $set) {
-    $ids = array_map('intval', array_keys($set));
-    sort($ids);
-    $topicPoolsOut[$topic] = $ids;
-}
-$topicPools = $topicPoolsOut;
-
-// tests map only from allowed tests
-$tMap = tests_map($testsList);
 
 /** -------- Helpers -------- */
 function quiz_session_is_valid(array $quiz): bool {
@@ -410,17 +351,21 @@ function format_mmss(int $sec): string {
     return sprintf('%d:%02d', $m, $s);
 }
 
-/** Utility: sample N ids deterministically by seed */
-function sample_ids(array $ids, int $n, int $seed): array {
-    $ids = array_values($ids);
-    if ($seed === 0) $seed = 777;
-    mt_srand($seed);
-    shuffle($ids);
-    return array_slice($ids, 0, min($n, count($ids)));
+/** ✅ NEW: build stable key for passed_items (exam/trainer/etc.) */
+function passed_item_key(array $quiz): string {
+    $mode = (string)($quiz['mode'] ?? 'unknown');
+    $topic = (string)($quiz['topic'] ?? '');
+    $seed = (string)($quiz['seed'] ?? '');
+    $mist = !empty($quiz['mistakes_only']) ? 'mistakes' : 'all';
+    $tId  = (int)($quiz['test_id'] ?? 0);
+
+    // For exam/trainer we rely on mode+topic+seed; for test mode we keep test_id separately anyway
+    return $mode . '|' . $mist . '|' . $topic . '|' . $seed . '|testid=' . $tId;
 }
 
 /** -------- Actions -------- */
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    // ✅ bootstrap expects param
     csrf_verify((string)($_POST['csrf'] ?? null));
 
     $action = (string)($_POST['action'] ?? '');
@@ -431,34 +376,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if ($action === 'start') {
-        // ✅ add new modes (case-insensitive) + do NOT silently downgrade to "test"
-        $modeRaw = strtolower((string)($_POST['mode'] ?? 'test'));
-        $allowedModes = ['test','exam','trainer','exam_topic','exam_mix','trainer_topic','trainer_mix'];
-        if (!in_array($modeRaw, $allowedModes, true)) {
-            quiz_abort('Невірний режим запуску', ['mode' => $modeRaw, 'allowed' => $allowedModes]);
-        }
-        $mode = $modeRaw;
+        $mode = (string)($_POST['mode'] ?? 'test'); // test|exam|trainer
+        $mode = in_array($mode, ['test','exam','trainer'], true) ? $mode : 'test';
 
         $testId = (int)($_POST['test_id'] ?? 0);
         $seed = (int)($_POST['seed'] ?? 0);
         $mistakesOnly = !empty($_POST['mistakes_only']);
 
-        $topicReq = (string)($_POST['topic'] ?? '');
-        $partReq  = (int)($_POST['part'] ?? 1);
-        if ($partReq < 1) $partReq = 1;
-
         $title = 'Тест';
         $topic = '';
-        $timeLimit = 1200;
-        $maxMistakes = 3;
+        $timeLimit = 1200; // default 20 min for tests/trainer
+        $maxMistakes = 3;  // ✅ NEW: 3 mistakes stop
 
         $qIds = [];
 
-        // ===== TEST (as was) =====
         if ($mode === 'test') {
             $t = $tMap[$testId] ?? null;
             if (!is_array($t)) {
-                quiz_abort('Тест не знайдено (або обрізано за темами)', ['test_id' => $testId]);
+                quiz_abort('Тест не знайдено', ['test_id' => $testId]);
             }
 
             $title = (string)($t['title'] ?? 'Тест');
@@ -467,24 +402,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $timeLimit = (int)($t['time_limit_sec'] ?? 1200);
             if ($timeLimit <= 0) $timeLimit = 1200;
 
+            // ignore json mistakes, enforce 3 as requested
             $maxMistakes = 3;
 
             $rawIds = $t['question_ids'] ?? [];
             if (!is_array($rawIds)) $rawIds = [];
 
+            // ✅ Anti-loop / sync: filter through qMap
             $filtered = [];
             $missing = [];
             foreach ($rawIds as $id) {
                 $qid = (int)$id;
-                // additionally ensure qid is within cutoff set (qMap)
                 if ($qid > 0 && isset($qMap[$qid])) $filtered[] = $qid;
                 else $missing[] = $qid;
             }
 
             if (count($filtered) < 1) {
-                quiz_abort('У тесті немає валідних питань (після обрізки)', [
+                quiz_abort('У тесті немає валідних питань', [
                     'test_id' => $testId,
                     'title' => $title,
+                    'questions_loaded' => 0,
                     'missing_examples' => array_slice(array_values(array_filter($missing, fn($x)=> (int)$x>0)), 0, 20),
                 ]);
             }
@@ -492,12 +429,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $qIds = array_values($filtered);
         }
 
-        // ===== EXAM MIX =====
-        if ($mode === 'exam' || $mode === 'exam_mix') {
+        if ($mode === 'exam') {
             $title = 'Іспит';
-            $topic = ($mode === 'exam_mix') ? 'Змішаний іспит' : 'Контрольний іспит';
-            $timeLimit = 40 * 60; // 40 хв
-            $maxMistakes = 3;
+            $topic = 'Контрольний іспит';
+            $timeLimit = 2400; // 40 min
+            $maxMistakes = 3;  // ✅ as requested (3 mistakes stop)
 
             $all = array_keys($qMap);
             if (count($all) < 40) {
@@ -508,107 +444,46 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
 
             if ($seed === 0) $seed = 777;
-            $qIds = sample_ids($all, 40, $seed);
+            mt_srand($seed);
+            shuffle($all);
+            $qIds = array_slice($all, 0, 40);
         }
 
-        // ===== EXAM TOPIC (by topic + part) =====
-        if ($mode === 'exam_topic') {
-            $title = 'Іспит';
-            $topic = $topicReq !== '' ? $topicReq : 'Іспит по темі';
-            $timeLimit = 40 * 60; // 40 хв
+        if ($mode === 'trainer') {
+            $title = 'Тренажер';
+            $topic = $mistakesOnly ? 'Повтор помилок' : 'Мікс питань';
+            $timeLimit = 1200; // 20 min
             $maxMistakes = 3;
 
-            if ($topicReq === '' || !isset($topicPools[$topicReq]) || !is_array($topicPools[$topicReq])) {
-                quiz_abort('Невірна тема для іспиту', ['topic' => $topicReq]);
+            $all = array_keys($qMap);
+            if (count($all) < 1) {
+                quiz_abort('Немає питань для тренажера', []);
             }
 
-            $pool = $topicPools[$topicReq];
-            if (count($pool) < 1) quiz_abort('В темі немає питань', ['topic' => $topicReq]);
+            if ($mistakesOnly) {
+                $mIds = progress_all_mistakes_ids((string)$uid);
+                // Keep only those that exist
+                $filtered = [];
+                foreach ($mIds as $qid) if (isset($qMap[$qid])) $filtered[] = $qid;
 
-            // split to parts of 40; always return exactly 40 (last part padded by random from same pool)
-            $baseParts = (int)ceil(count($pool) / 40);
-            if ($partReq > $baseParts) $partReq = $baseParts;
-
-            $chunks = array_chunk($pool, 40);
-            $chunk = $chunks[$partReq - 1] ?? [];
-            $chunk = array_values(array_unique(array_map('intval', $chunk)));
-
-            if (count($chunk) < 40) {
-                // pad with deterministic random from remaining ids
-                $remSet = array_diff($pool, $chunk);
-                $padSeed = $seed !== 0 ? $seed : (int)abs(crc32($topicReq . '|part|' . $partReq));
-                $pad = sample_ids(array_values($remSet), 40 - count($chunk), $padSeed);
-                $chunk = array_values(array_unique(array_merge($chunk, $pad)));
-
-                // if still < 40 (rare) allow reuse
-                if (count($chunk) < 40) {
-                    $more = sample_ids($pool, 40 - count($chunk), $padSeed + 1);
-                    $chunk = array_values(array_merge($chunk, $more));
-                }
-                $chunk = array_slice($chunk, 0, 40);
-            }
-
-            // ensure exists in qMap
-            $final = [];
-            foreach ($chunk as $qid) if (isset($qMap[$qid])) $final[] = $qid;
-            if (count($final) < 1) quiz_abort('Не вдалось сформувати іспит по темі', ['topic'=>$topicReq,'part'=>$partReq]);
-
-            $qIds = $final;
-        }
-
-        // ===== TRAINER =====
-        if ($mode === 'trainer' || $mode === 'trainer_mix' || $mode === 'trainer_topic') {
-            $title = 'Тренажер';
-            $timeLimit = 0; // ✅ unlimited
-            $maxMistakes = 999999; // ✅ unlimited mistakes
-
-            if ($mode === 'trainer_topic') {
-                if ($topicReq === '' || !isset($topicPools[$topicReq]) || !is_array($topicPools[$topicReq])) {
-                    quiz_abort('Невірна тема для тренажера', ['topic' => $topicReq]);
-                }
-                $topic = $topicReq;
-                $pool = $topicPools[$topicReq];
-                $seed = $seed !== 0 ? $seed : (int)abs(crc32($topicReq . '|trainer'));
-                $qIds = sample_ids($pool, 40, $seed);
-            } else {
-                $topic = ($mistakesOnly || $mode === 'trainer') ? 'Повтор помилок' : 'Мікс питань';
-                $all = array_keys($qMap);
-
-                if (count($all) < 1) quiz_abort('Немає питань для тренажера', []);
-
-                if ($mistakesOnly && ($mode === 'trainer')) {
-                    $mIds = progress_all_mistakes_ids((string)$uid);
-                    $filtered = [];
-                    foreach ($mIds as $qid) if (isset($qMap[$qid])) $filtered[] = $qid;
-
-                    if (count($filtered) >= 1) {
-                        $seed = $seed !== 0 ? $seed : (int)(time() % 1000000);
-                        $qIds = sample_ids($filtered, 40, $seed);
-                    } else {
-                        $seed = $seed !== 0 ? $seed : 777;
-                        $qIds = sample_ids($all, 40, $seed);
-                    }
+                // If no mistakes yet -> fallback to random mix
+                if (count($filtered) >= 1) {
+                    $seed = $seed !== 0 ? $seed : (int)(time() % 1000000);
+                    mt_srand($seed);
+                    shuffle($filtered);
+                    $qIds = array_slice($filtered, 0, min(40, count($filtered)));
                 } else {
                     $seed = $seed !== 0 ? $seed : 777;
-                    $qIds = sample_ids($all, 40, $seed);
+                    mt_srand($seed);
+                    shuffle($all);
+                    $qIds = array_slice($all, 0, min(20, count($all)));
                 }
+            } else {
+                $seed = $seed !== 0 ? $seed : 777;
+                mt_srand($seed);
+                shuffle($all);
+                $qIds = array_slice($all, 0, min(20, count($all)));
             }
-        }
-
-        // Safety: filter to existing qMap only
-        $qIdsFiltered = [];
-        foreach ($qIds as $qid) {
-            $qid = (int)$qid;
-            if ($qid > 0 && isset($qMap[$qid])) $qIdsFiltered[] = $qid;
-        }
-        $qIds = array_values($qIdsFiltered);
-
-        if (count($qIds) < 1) {
-            quiz_abort('Немає питань для старту (після обрізки)', [
-                'mode' => $mode,
-                'topic' => $topicReq,
-                'test_id' => $testId,
-            ]);
         }
 
         $_SESSION['quiz'] = [
@@ -616,8 +491,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'test_id' => $testId,
             'title' => $title,
             'topic' => $topic,
-            'topic_req' => $topicReq,
-            'part' => $partReq,
             'q_ids' => $qIds,
             'idx' => 0,
             'total' => count($qIds),
@@ -651,7 +524,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $qid = (int)$qIds[$idx];
         $q = $qMap[$qid] ?? null;
         if (!is_array($q)) {
-            quiz_abort('Питання не знайдено', ['qid' => $qid, 'idx' => $idx]);
+            // skip broken entry
+            $quiz['idx'] = min($total, $idx + 1);
+            $_SESSION['quiz'] = $quiz;
+            quiz_redirect('/account/quiz.php');
         }
 
         $correct = (int)$q['correct'];
@@ -659,7 +535,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         if (!isset($quiz['answers']) || !is_array($quiz['answers'])) $quiz['answers'] = [];
 
-        // Save answer once
+        // Save answer for this idx (prevent re-answer spam)
         if (!array_key_exists((string)$idx, $quiz['answers'])) {
             $quiz['answers'][(string)$idx] = [
                 'qid' => $qid,
@@ -670,19 +546,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             ];
         }
 
-        // ✅ DO NOT auto-next (stay on same idx to show explain)
+        // ✅ НЕ перелистуємо автоматично: залишаємо idx на поточному питанні
         $_SESSION['quiz'] = $quiz;
 
-        // ✅ auto finish on mistakes limit (exam/test)
+        // ✅ auto finish on 3 mistakes
         $mistakes = quiz_count_mistakes($quiz);
         $maxMistakes = (int)($quiz['max_mistakes'] ?? 3);
         if ($mistakes >= $maxMistakes) {
-            quiz_redirect('/account/quiz.php?action=finish');
-        }
-
-        // ✅ if all answered -> finish
-        $answered = is_array($quiz['answers']) ? count($quiz['answers']) : 0;
-        if ($answered >= $total) {
             quiz_redirect('/account/quiz.php?action=finish');
         }
 
@@ -703,6 +573,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         quiz_redirect('/account/quiz.php');
     }
 
+    // fallback
     quiz_redirect('/account/quiz.php');
 }
 
@@ -735,6 +606,7 @@ if ($action === 'finish') {
     $mode = (string)($quiz['mode'] ?? 'test');
     $testId = (int)($quiz['test_id'] ?? 0);
 
+    // collect wrong qids
     $wrongQids = [];
     foreach ($answers as $a) {
         if (!is_array($a)) continue;
@@ -744,10 +616,13 @@ if ($action === 'finish') {
     }
     $wrongQids = array_values(array_filter($wrongQids, fn($x)=> $x>0));
 
+    // store mistakes under test_id when possible, else under 0
     $bucketTestId = ($mode === 'test' && $testId > 0) ? $testId : 0;
     if (count($wrongQids) > 0) {
         progress_add_mistakes((string)$uid, $bucketTestId, $wrongQids);
     }
+
+    // ✅ FIX: mark "passed" not only for tests, but also for exam/trainer
     if ($passed) {
         if ($mode === 'test' && $testId > 0) {
             progress_mark_passed((string)$uid, $testId);
@@ -795,11 +670,7 @@ if ($action === 'finish') {
             <div class="pp-row">
                 <div class="pp-pill">Відповіді: <?= (int)$answered ?> / <?= (int)$total ?></div>
                 <div class="pp-pill">Помилки: <?= (int)$mistakes ?> / <?= (int)$maxMistakes ?></div>
-                <?php if ($timeLimit > 0): ?>
-                    <div class="pp-pill">Час: <?= h(format_mmss((int)$spent)) ?> (ліміт <?= h(format_mmss((int)$timeLimit)) ?>)</div>
-                <?php else: ?>
-                    <div class="pp-pill">Час: без ліміту</div>
-                <?php endif; ?>
+                <div class="pp-pill">Час: <?= h(format_mmss((int)$spent)) ?><?= $timeLimit > 0 ? ' (ліміт ' . h(format_mmss((int)$timeLimit)) . ')' : '' ?></div>
                 <div class="pp-pill">Статус:
                     <b class="<?= $passed ? 'pp-status-ok' : 'pp-status-bad' ?>"><?= $passed ? 'Складено' : 'Не складено' ?></b>
                 </div>
@@ -845,8 +716,10 @@ if ($idx >= $total) {
 $qid = (int)$qIds[$idx];
 $q = $qMap[$qid] ?? null;
 if (!is_array($q)) {
-    $quiz_abort = ['qid' => $qid, 'idx' => $idx];
-    quiz_abort('Питання не знайдено (можливо обрізано)', $quiz_abort);
+    // skip broken
+    $quiz['idx'] = min($total, $idx + 1);
+    $_SESSION['quiz'] = $quiz;
+    quiz_redirect('/account/quiz.php');
 }
 
 $answers = $quiz['answers'] ?? [];
@@ -857,11 +730,12 @@ $started = (int)($quiz['started_at'] ?? time());
 $spent = time() - $started;
 $timeLeft = $timeLimit > 0 ? max(0, $timeLimit - $spent) : 0;
 
-// time over -> finish (only if limited)
+// If time over -> finish
 if ($timeLimit > 0 && $spent > $timeLimit) {
     quiz_redirect('/account/quiz.php?action=finish');
 }
 
+// ✅ auto finish if already 3 mistakes
 $mistakes = quiz_count_mistakes($quiz);
 $maxMistakes = (int)($quiz['max_mistakes'] ?? 3);
 if ($mistakes >= $maxMistakes) {
@@ -870,6 +744,7 @@ if ($mistakes >= $maxMistakes) {
 
 $csrf = csrf_token();
 
+// current answered?
 $currentAnswer = $answers[(string)$idx] ?? null;
 $alreadyAnswered = is_array($currentAnswer) && isset($currentAnswer['choice']);
 $chosen = $alreadyAnswered ? (int)$currentAnswer['choice'] : 0;
@@ -890,7 +765,10 @@ $topic = (string)($quiz['topic'] ?? '');
     <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=Unbounded:wght@500;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/assets/css/style.css?v=4">
     <style>
-        .pp-wrap{max-width:980px;margin:24px auto;padding:0 16px}
+        body{padding-bottom: calc(var(--pp-bottom-h, 120px) + 16px);}
+        html{scroll-behavior:smooth;}
+
+        .pp-wrap{max-width:980px;margin:12px auto;padding:0 16px}
         .pp-card{background:#fff;border-radius:18px;padding:18px;box-shadow:0 8px 30px rgba(0,0,0,0.06);border:1px solid rgba(12,32,22,.06)}
         .pp-head{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:10px}
         .pp-hgroup{display:flex;flex-direction:column;gap:4px}
@@ -899,23 +777,59 @@ $topic = (string)($quiz['topic'] ?? '');
         .pp-q{font-size:18px;font-weight:800;margin:12px 0}
         .pp-img{margin:10px 0}
         .pp-img img{max-width:100%;height:auto;border-radius:14px;display:block;border:1px solid rgba(12,32,22,.08)}
-        .pp-opt{display:block;width:100%;text-align:left;border:1px solid rgba(12,32,22,.10);background:#fff;border-radius:14px;padding:12px 12px;margin:10px 0;cursor:pointer;font-weight:700}
+
+        /* ✅ FIX: force visible text color on options (mobile inherits white from global css) */
+        .pp-opt{
+            display:block;width:100%;text-align:left;
+            border:1px solid rgba(12,32,22,.10);
+            background:#fff;
+            border-radius:14px;
+            padding:12px 12px;
+            margin:10px 0;
+            cursor:pointer;
+            font-weight:700;
+            color:#0b1b14;              /* ✅ important */
+            -webkit-text-fill-color:#0b1b14; /* ✅ iOS/Safari fallback */
+        }
         .pp-opt:hover{background:rgba(11,27,20,.03)}
         .pp-opt[disabled]{cursor:default;opacity:1}
-        .pp-opt.is-correct{border-color:rgba(10,122,61,.35);background:rgba(10,122,61,.08)}
-        .pp-opt.is-wrong{border-color:rgba(180,35,24,.35);background:rgba(180,35,24,.08)}
+
+        /* keep readable text on colored states too */
+        .pp-opt.is-correct{
+            border-color:rgba(10,122,61,.35);
+            background:rgba(10,122,61,.08);
+            color:#0b1b14;
+            -webkit-text-fill-color:#0b1b14;
+        }
+        .pp-opt.is-wrong{
+            border-color:rgba(180,35,24,.35);
+            background:rgba(180,35,24,.08);
+            color:#0b1b14;
+            -webkit-text-fill-color:#0b1b14;
+        }
+
         .pp-explain{margin-top:12px;border-radius:14px;border:1px solid rgba(12,32,22,.10);background:rgba(11,27,20,.02);padding:12px}
         .pp-explain__t{font-weight:900;margin-bottom:6px}
         .pp-explain__b{opacity:.9;font-weight:650;line-height:1.45}
 
+        /* --- Top progress row (circles + arrows) --- */
         .pp-progress{display:flex;align-items:center;gap:10px;margin-bottom:12px}
-        .pp-navbtn{width:44px;height:44px;border-radius:999px;border:1px solid rgba(12,32,22,.10);background:rgba(11,27,20,.03);display:flex;align-items:center;justify-content:center;font-weight:900}
+        .pp-navbtn{
+            width:44px;height:44px;border-radius:999px;
+            border:1px solid rgba(12,32,22,.10);
+            background:rgba(11,27,20,.03);
+            display:flex;align-items:center;justify-content:center;
+            font-weight:900;
+            color:#0b1b14;              /* ✅ make arrows visible too */
+            -webkit-text-fill-color:#0b1b14;
+        }
         .pp-navbtn:hover{background:rgba(11,27,20,.06)}
         .pp-strip{flex:1;overflow:hidden}
         .pp-strip__inner{display:flex;gap:10px;overflow-x:auto;scroll-behavior:smooth;padding:6px 2px}
         .pp-strip__inner::-webkit-scrollbar{height:8px}
         .pp-strip__inner::-webkit-scrollbar-thumb{background:rgba(11,27,20,.12);border-radius:99px}
 
+        /* ✅ FIX: force visible numbers inside circles */
         .pp-dot{
             width:34px;height:34px;border-radius:999px;
             border:1px solid rgba(12,32,22,.16);
@@ -923,24 +837,17 @@ $topic = (string)($quiz['topic'] ?? '');
             display:flex;align-items:center;justify-content:center;
             font-weight:900;
             user-select:none;
+            color:#0b1b14;              /* ✅ important */
+            -webkit-text-fill-color:#0b1b14; /* ✅ iOS/Safari fallback */
         }
         .pp-dot.is-current{outline:2px solid rgba(10,122,61,.25);outline-offset:2px}
         .pp-dot.is-ok{border-color:rgba(10,122,61,.35);background:rgba(10,122,61,.10)}
         .pp-dot.is-bad{border-color:rgba(180,35,24,.35);background:rgba(180,35,24,.10)}
 
         .pp-goform{margin:0}
-        .pp-gobtn{
-            border:none;background:transparent;padding:0;margin:0;
-            cursor:pointer;
-        }
+        .pp-gobtn{border:none;background:transparent;padding:0;margin:0;cursor:pointer;}
 
-        .pp-bottom{
-            position:sticky;
-            bottom:0;
-            margin-top:14px;
-            padding-top:10px;
-            background:linear-gradient(to top, #fff 70%, rgba(255,255,255,0));
-        }
+        /* --- Bottom bar --- */
         .pp-bar{
             display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;
             border:1px solid rgba(12,32,22,.10);
@@ -952,14 +859,27 @@ $topic = (string)($quiz['topic'] ?? '');
         .pp-pill{
             background:#fff;border:1px solid rgba(12,32,22,.10);
             border-radius:999px;padding:8px 12px;font-weight:900;
+            color:#0b1b14;              /* ✅ visible text on mobile */
+            -webkit-text-fill-color:#0b1b14;
         }
         .pp-pill small{opacity:.7;font-weight:800}
         .pp-btn{display:inline-flex;align-items:center;justify-content:center;padding:12px 14px;border-radius:14px;background:#0b1b14;color:#fff;text-decoration:none;border:none;font-weight:900}
         .pp-btn2{display:inline-flex;align-items:center;justify-content:center;padding:12px 14px;border-radius:14px;background:#f1f3f7;color:#111;text-decoration:none;border:none;font-weight:900}
         .pp-btn:disabled{opacity:.6}
 
+        .pp-bottom{
+            position:fixed;
+            left:0;
+            right:0;
+            bottom:0;
+            z-index:50;
+            padding:12px 16px;
+            background:linear-gradient(to top, #fff 70%, rgba(255,255,255,0));
+        }
+        .pp-bottom .pp-bar{max-width:980px;margin:0 auto;}
+
         @media (max-width: 560px){
-            .pp-wrap{margin:14px auto}
+            .pp-wrap{margin:10px auto}
             .pp-card{padding:14px;border-radius:16px}
             .pp-navbtn{width:42px;height:42px}
             .pp-dot{width:32px;height:32px}
@@ -973,6 +893,7 @@ $topic = (string)($quiz['topic'] ?? '');
          data-timeleft="<?= (int)$timeLeft ?>"
          data-timelimit="<?= (int)$timeLimit ?>">
 
+        <!-- Progress row (top) -->
         <div class="pp-progress">
             <button class="pp-navbtn" type="button" id="ppPrev" aria-label="Ліворуч">‹</button>
             <div class="pp-strip">
@@ -981,9 +902,7 @@ $topic = (string)($quiz['topic'] ?? '');
                         $a = $answers[(string)$i] ?? null;
                         $cls = [];
                         if ($i === $idx) $cls[] = 'is-current';
-                        if (is_array($a) && isset($a['is_correct'])) {
-                            $cls[] = $a['is_correct'] ? 'is-ok' : 'is-bad';
-                        }
+                        if (is_array($a) && isset($a['is_correct'])) $cls[] = $a['is_correct'] ? 'is-ok' : 'is-bad';
                         $clsStr = implode(' ', $cls);
                         ?>
                         <form class="pp-goform" method="post" action="/account/quiz.php">
@@ -1024,7 +943,6 @@ $topic = (string)($quiz['topic'] ?? '');
             <?php foreach ($q['options'] as $i => $opt): ?>
                 <?php
                 $n = $i + 1;
-
                 $btnCls = '';
                 $disabled = false;
 
@@ -1055,48 +973,54 @@ $topic = (string)($quiz['topic'] ?? '');
             </div>
         <?php endif; ?>
 
-        <div class="pp-bottom">
-            <div class="pp-bar">
-                <div class="pp-bar__left">
-                    <div class="pp-pill"><small>Питання</small> <span><?= (int)($idx+1) ?></span>/<span><?= (int)$total ?></span></div>
-                    <div class="pp-pill"><small>Помилки</small> <span id="mistakesNow"><?= (int)$mistakes ?></span>/<span><?= (int)$maxMistakes ?></span></div>
+    </div>
+</div>
 
-                    <?php if ($timeLimit > 0): ?>
-                        <div class="pp-pill"><small>Час</small> <span id="timerText"><?= h(format_mmss((int)$timeLeft)) ?></span> / <span><?= h(format_mmss((int)$timeLimit)) ?></span></div>
-                    <?php else: ?>
-                        <div class="pp-pill"><small>Час</small> <span id="timerText">без ліміту</span></div>
-                    <?php endif; ?>
-                </div>
-
-                <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
-                    <a class="pp-btn2" href="/account/quiz.php?action=finish">Завершити</a>
-
-                    <?php $isLast = ($idx >= $total - 1); ?>
-
-                    <?php if ($alreadyAnswered && !$isLast): ?>
-                        <form method="post" action="/account/quiz.php" style="margin:0">
-                            <input type="hidden" name="csrf" value="<?= h($csrf) ?>">
-                            <input type="hidden" name="action" value="go">
-                            <input type="hidden" name="to" value="<?= (int)($idx+1) ?>">
-                            <button class="pp-btn" type="submit">Далі →</button>
-                        </form>
-                    <?php elseif ($alreadyAnswered && $isLast): ?>
-                        <a class="pp-btn" href="/account/quiz.php?action=finish">Завершити</a>
-                    <?php else: ?>
-                        <button class="pp-btn" type="button" disabled>Обери відповідь</button>
-                    <?php endif; ?>
-                </div>
-            </div>
+<div class="pp-bottom">
+    <div class="pp-bar">
+        <div class="pp-bar__left">
+            <div class="pp-pill"><small>Питання</small> <span><?= (int)($idx+1) ?></span>/<span><?= (int)$total ?></span></div>
+            <div class="pp-pill"><small>Помилки</small> <span id="mistakesNow"><?= (int)$mistakes ?></span>/<span><?= (int)$maxMistakes ?></span></div>
+            <div class="pp-pill"><small>Час</small> <span id="timerText"><?= h(format_mmss((int)$timeLeft)) ?></span> / <span><?= h(format_mmss((int)$timeLimit)) ?></span></div>
         </div>
 
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+            <a class="pp-btn2" href="/account/quiz.php?action=finish">Завершити</a>
+
+            <?php $isLast = ($idx >= $total - 1); ?>
+
+            <?php if ($alreadyAnswered && !$isLast): ?>
+                <form method="post" action="/account/quiz.php" style="margin:0">
+                    <input type="hidden" name="csrf" value="<?= h($csrf) ?>">
+                    <input type="hidden" name="action" value="go">
+                    <input type="hidden" name="to" value="<?= (int)($idx+1) ?>">
+                    <button class="pp-btn" type="submit">Далі →</button>
+                </form>
+            <?php elseif ($alreadyAnswered && $isLast): ?>
+                <a class="pp-btn" href="/account/quiz.php?action=finish">Завершити</a>
+            <?php else: ?>
+                <button class="pp-btn" type="button" disabled>Далі</button>
+            <?php endif; ?>
+        </div>
     </div>
 </div>
 
 <script>
 (function(){
-    const root = document.getElementById('quizRoot');
+    // --- Fix fixed bottom bar overlap (set CSS var to its height) ---
+    const bottom = document.querySelector('.pp-bottom');
+    if (bottom) {
+        const h = bottom.offsetHeight || 0;
+        document.documentElement.style.setProperty('--pp-bottom-h', h + 'px');
+    }
+
+    // --- Always bring viewport to top of quiz card on each load ---
+    window.scrollTo(0, 0);
+
+    // --- Timer tick each second (mm:ss) ---
     const timerEl = document.getElementById('timerText');
-    if (!root || !timerEl) return;
+    const root = document.getElementById('quizRoot');
+    if (!timerEl || !root) return;
 
     let left = parseInt(root.getAttribute('data-timeleft') || '0', 10);
     const limit = parseInt(root.getAttribute('data-timelimit') || '0', 10);
@@ -1108,8 +1032,9 @@ $topic = (string)($quiz['topic'] ?? '');
         return m + ':' + String(s).padStart(2,'0');
     }
 
+    timerEl.textContent = mmss(left);
+
     if (limit > 0) {
-        timerEl.textContent = mmss(left);
         setInterval(function(){
             left -= 1;
             if (left <= 0) {
@@ -1121,6 +1046,7 @@ $topic = (string)($quiz['topic'] ?? '');
         }, 1000);
     }
 
+    // --- Top strip arrows (scroll one "page") ---
     const strip = document.getElementById('ppStrip');
     const prev = document.getElementById('ppPrev');
     const next = document.getElementById('ppNext');
@@ -1134,6 +1060,7 @@ $topic = (string)($quiz['topic'] ?? '');
     if (prev) prev.addEventListener('click', () => scrollByAmount(-1));
     if (next) next.addEventListener('click', () => scrollByAmount(+1));
 
+    // Auto-scroll to current dot
     const currentDot = strip ? strip.querySelector('.pp-dot.is-current') : null;
     if (strip && currentDot) {
         const r = currentDot.getBoundingClientRect();
@@ -1142,6 +1069,13 @@ $topic = (string)($quiz['topic'] ?? '');
             strip.scrollBy({ left: (r.left - sr.left) - 60, behavior: 'smooth' });
         }
     }
+
+    // Recalc bottom height on resize
+    window.addEventListener('resize', () => {
+        const bottom = document.querySelector('.pp-bottom');
+        if (!bottom) return;
+        document.documentElement.style.setProperty('--pp-bottom-h', (bottom.offsetHeight || 0) + 'px');
+    });
 })();
 </script>
 

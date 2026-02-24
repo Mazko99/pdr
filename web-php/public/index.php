@@ -115,7 +115,7 @@ if ($userFirstName !== '') {
           <a class="btn btn--primary mobile__btn" href="/logout">Вийти</a>
         <?php else: ?>
           <a class="btn btn--ghost mobile__btn" href="/login/index.php">Вхід</a>
-          <a class="btn btn--primary mobile__btn" href="/register">Реєстрація</a>
+          <a class="btn btn--primary mobile__btn" href="/login/index.php">Реєстрація</a>
           <a class="btn btn--ghost mobile__btn" href="#demo">Тестовий доступ 3 дні</a>
         <?php endif; ?>
       </div>
