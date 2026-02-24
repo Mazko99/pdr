@@ -1,0 +1,16 @@
+{
+    "users": {
+        "b9f216521528fbbcc166de60": {
+            "devices": {
+                "639f0a94ad1ece3a6b24254edb108c1422dec9df52998cf3ed9372e4cd8b3cff": {
+                    "label": "Mozilla\/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit\/537.36 (KHTML, like Gecko) Chrome\/14…",
+                    "first_seen": "2026-02-23T23:31:45+00:00",
+                    "last_seen": "2026-02-23T23:31:51+00:00"
+                }
+            },
+            "active_session": "76dd102ea51e9663c6d572a630cb0bc5fa52b53e71ab774d",
+            "active_device": "639f0a94ad1ece3a6b24254edb108c1422dec9df52998cf3ed9372e4cd8b3cff",
+            "active_at": "2026-02-23T23:31:51+00:00"
+        }
+    }
+}

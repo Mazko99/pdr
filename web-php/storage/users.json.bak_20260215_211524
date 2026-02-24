@@ -1,0 +1,77 @@
+{
+    "users": [
+        {
+            "id": "11105da31c40cd0d705a5246",
+            "email": "restiuor1@gmil.com",
+            "name": "Андрій Миколайович Мазка",
+            "password_hash": "$2y$12$\/u5Cogu48\/fG7SAEEmPA2uTtw218woPbMtkLGdZBd3u0XYT8ZSTFe",
+            "created_at": "2026-02-13T12:18:17+00:00"
+        },
+        {
+            "id": "9edf02459740f3afb102d10a",
+            "email": "restiuor@gmil.com",
+            "name": "Andrii",
+            "password_hash": "$2y$12$FU\/w9xuj\/QkZeNEpNny8WOXFQIPleC1FGIqyYePng.u1lxqVweLIG",
+            "plan": null,
+            "plan_set_at": null,
+            "created_at": "2026-02-14T10:47:16+00:00"
+        },
+        {
+            "id": "8a398aa77f5dcc2890232a46",
+            "email": "restior1@gmil.com",
+            "name": "бобер лісніков",
+            "password_hash": "$2y$12$qMsUGQu2KF4SFMM0WzgnHOKE4MffFhBKOkKyouYWl.ESNFcpHD5fC",
+            "plan": null,
+            "plan_set_at": null,
+            "created_at": "2026-02-14T13:16:10+00:00"
+        },
+        {
+            "id": "a67f728db01f9673b7d58fa4",
+            "email": "restr1@gmil.com",
+            "name": "rrr",
+            "password_hash": "$2y$12$py3wxqO09.OoguHhHKu2CeOvQwTo9ji4Atn\/loqrD7Y5kwEp75q6G",
+            "plan": null,
+            "plan_set_at": null,
+            "created_at": "2026-02-14T21:11:51+00:00"
+        }
+    ],
+    "0": {
+        "0": {
+            "id": "11105da31c40cd0d705a5246",
+            "email": "restiuor1@gmil.com",
+            "name": "Андрій Миколайович Мазка",
+            "password_hash": "$2y$12$\/u5Cogu48\/fG7SAEEmPA2uTtw218woPbMtkLGdZBd3u0XYT8ZSTFe",
+            "created_at": "2026-02-13T12:18:17+00:00"
+        },
+        "1": {
+            "id": "9edf02459740f3afb102d10a",
+            "email": "restiuor@gmil.com",
+            "name": "Andrii",
+            "password_hash": "$2y$12$FU\/w9xuj\/QkZeNEpNny8WOXFQIPleC1FGIqyYePng.u1lxqVweLIG",
+            "plan": null,
+            "plan_set_at": null,
+            "created_at": "2026-02-14T10:47:16+00:00"
+        },
+        "2": {
+            "id": "8a398aa77f5dcc2890232a46",
+            "email": "restior1@gmil.com",
+            "name": "бобер лісніков",
+            "password_hash": "$2y$12$qMsUGQu2KF4SFMM0WzgnHOKE4MffFhBKOkKyouYWl.ESNFcpHD5fC",
+            "plan": null,
+            "plan_set_at": null,
+            "created_at": "2026-02-14T13:16:10+00:00"
+        },
+        "3": {
+            "id": "a67f728db01f9673b7d58fa4",
+            "email": "restr1@gmil.com",
+            "name": "rrr",
+            "password_hash": "$2y$12$py3wxqO09.OoguHhHKu2CeOvQwTo9ji4Atn\/loqrD7Y5kwEp75q6G",
+            "plan": null,
+            "plan_set_at": null,
+            "created_at": "2026-02-14T21:11:51+00:00"
+        },
+        "plan": "personal",
+        "paid_at": "2026-02-14T21:50:45+00:00",
+        "expires_at": "2026-03-16T21:50:45+00:00"
+    }
+}

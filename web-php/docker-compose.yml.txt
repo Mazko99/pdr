@@ -1,0 +1,52 @@
+services:
+  nginx:
+    image: nginx:1.25-alpine
+    ports:
+      - "8080:80"
+    volumes:
+      - ./infra/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./infra/nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./web-php/public:/var/www/public:ro
+    depends_on:
+      - php
+      - api
+    networks: [appnet]
+
+  php:
+    build: ./web-php
+    environment:
+      APP_ENV: ${APP_ENV:-dev}
+      API_BASE_URL: ${API_BASE_URL:-http://api:8000}
+    volumes:
+      - ./web-php:/var/www
+    networks: [appnet]
+
+  api:
+    build: ./api-python
+    environment:
+      APP_ENV: ${APP_ENV:-dev}
+      JWT_SECRET: ${JWT_SECRET:-change_me}
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://app:app@db:5432/app}
+    depends_on: [db]
+    networks: [appnet]
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: app
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: app
+    volumes:
+      - dbdata:/var/lib/postgresql/data
+      - ./db/init:/docker-entrypoint-initdb.d:ro
+    networks: [appnet]
+
+  redis:
+    image: redis:7-alpine
+    networks: [appnet]
+
+networks:
+  appnet:
+
+volumes:
+  dbdata:
