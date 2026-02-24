@@ -11,4 +11,4 @@ RUN printf '%s\n' \
 'error_log=/proc/self/fd/2' \
 > /usr/local/etc/php/conf.d/railway-errors.ini
 
-CMD ["sh","-lc","echo \"PORT=$PORT\"; cd /app/web-php/public && php -S 0.0.0.0:${PORT} router.php"]
+CMD ["sh","-lc","cd /app/web-php/public && php -S 0.0.0.0:${PORT} router.php"]

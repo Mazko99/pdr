@@ -1,13 +1,12 @@
 <?php
-// web-php/public/router.php
 
-$path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
-
-// якщо запит на існуючий файл (css/js/img/svg/...)
+$path = parse_url($_SERVER["REQUEST_URI"], PHP_URL_PATH);
 $file = __DIR__ . $path;
-if ($path !== '/' && is_file($file)) {
-    return false; // віддати файл напряму
+
+// якщо це реальний файл (css/js/png/svg/jpg)
+if ($path !== "/" && file_exists($file)) {
+    return false;
 }
 
-// інакше — запускаємо фронт-контролер
-require __DIR__ . '/index.php';
+// інакше запускаємо index.php
+require __DIR__ . "/index.php";
