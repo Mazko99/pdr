@@ -1,15 +1,9 @@
 <?php
-
 $uri = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
 $path = __DIR__ . $uri;
 
-// якщо файл існує — віддати напряму
 if ($uri !== '/' && file_exists($path) && !is_dir($path)) {
     return false;
 }
 
-// інакше index.php
-require __DIR__ . '/index.php';
-
-// fallback
 require __DIR__ . '/index.php';
