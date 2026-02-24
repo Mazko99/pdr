@@ -5,26 +5,9 @@ require __DIR__ . '/../../src/bootstrap.php';
 
 /**
  * ProstoPDR / public/account/quiz.php
- * - JSON source of truth: public/data/questions_export.json
- * - Tests: public/data/tests_export.json
- * - Session schema: per your context
- * - FIXES:
- *   ✅ CSRF (bootstrap expects token param)
- *   ✅ Timer ticks every second (mm:ss)
- *   ✅ 3 mistakes => auto finish
- *   ✅ Correct option green, wrong red + show explain
- *   ✅ Circles are clickable + moved to top on mobile, single-row scroll w/ arrows
- *   ✅ Remove "джерело істини" text
- *   ✅ Save per-user progress: passed tests + aggregated mistakes for "work on mistakes"
- *   ✅ НЕ перелистує автоматом після відповіді (перехід тільки кнопкою "Далі")
- *   ✅ Нижня панель fixed + не перекриває пояснення
- *   ✅ Піднято робочу зону + автоскрол вгору на кожне питання
- *
- *   ✅ NEW: Save "Складено" not only for tests, but also for exam/trainer (passed_items)
- *
- *   ✅ NEW (24.02): FIX mobile text visibility:
- *      - options text visible (pp-opt)
- *      - circle numbers visible (pp-dot)
+ * ...
+ * ✅ FIX (24.02): options text + circle numbers visible on mobile
+ * ✅ FIX (24.02 #2): bottom fixed bar DOES NOT cover answers/explain (iOS/Telegram safe-area)
  */
 
 function h(string $s): string { return htmlspecialchars($s, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); }
@@ -33,10 +16,7 @@ function json_load_array(string $absPath): array {
     if (!is_file($absPath)) throw new RuntimeException("JSON file not found: {$absPath}");
     $raw = file_get_contents($absPath);
     if ($raw === false) throw new RuntimeException("Failed to read JSON file: {$absPath}");
-
-    // Strip UTF-8 BOM if present
     if (strncmp($raw, "\xEF\xBB\xBF", 3) === 0) $raw = substr($raw, 3);
-
     $data = json_decode($raw, true);
     if (!is_array($data)) {
         $err = json_last_error_msg();
@@ -54,7 +34,6 @@ function questions_map(array $questions): array {
         $id = (int)$q['id'];
         if ($id <= 0) continue;
 
-        // Required keys
         if (!isset($q['question']) || !is_string($q['question']) || trim($q['question']) === '') continue;
         if (!isset($q['options']) || !is_array($q['options']) || count($q['options']) < 2) continue;
         if (!isset($q['correct'])) continue;
@@ -66,7 +45,6 @@ function questions_map(array $questions): array {
         if (!array_key_exists('image', $q)) $q['image'] = null;
         if ($q['image'] === '') $q['image'] = null;
 
-        // Normalize options to strings
         $opts = [];
         foreach ($q['options'] as $o) $opts[] = is_string($o) ? $o : (string)$o;
         $q['options'] = $opts;
@@ -145,10 +123,7 @@ function quiz_abort(string $title, array $debug = []): void {
 }
 
 /** -------- Progress store (JSON, no SQL) -------- */
-function progress_path(): string {
-    $p = dirname(__DIR__, 2) . '/storage/progress.json'; // web-php/storage/progress.json
-    return $p;
-}
+function progress_path(): string { return dirname(__DIR__, 2) . '/storage/progress.json'; }
 
 function progress_load(): array {
     $p = progress_path();
@@ -180,9 +155,9 @@ function progress_user_get(string $uid): array {
     $u = $data['users'][$uid] ?? null;
     if (!is_array($u)) {
         $u = [
-            'passed_tests' => [], // [test_id => true]
-            'passed_items' => [], // ✅ NEW: [key => ['title'=>..., 'at'=>...]]
-            'mistakes' => [],     // [test_id => [qid...]]
+            'passed_tests' => [],
+            'passed_items' => [],
+            'mistakes' => [],
             'updated_at' => date('c'),
         ];
     }
@@ -225,7 +200,6 @@ function progress_mark_passed(string $uid, int $testId): void {
     progress_user_set($uid, $u);
 }
 
-/** ✅ NEW: mark passed for non-test modes (exam/trainer etc.) */
 function progress_mark_passed_item(string $uid, string $key, string $title): void {
     $u = progress_user_get($uid);
     $u['passed_items'][$key] = [
@@ -257,7 +231,6 @@ if (!$uid) {
     exit;
 }
 
-// Access (keep your existing rule)
 $hasAccess = !empty($_SESSION['has_access']);
 if (!$hasAccess) {
     http_response_code(200);
@@ -308,18 +281,16 @@ if ($qFile === false || $tFile === false) {
     ]);
 }
 
-try {
-    $qMap = questions_map(json_load_array($qFile));
-} catch (Throwable $e) {
+try { $qMap = questions_map(json_load_array($qFile)); }
+catch (Throwable $e) {
     quiz_abort('Помилка читання questions_export.json', [
         'error' => $e->getMessage(),
         'questions_file' => $qFile,
     ]);
 }
 
-try {
-    $tMap = tests_map(json_load_array($tFile));
-} catch (Throwable $e) {
+try { $tMap = tests_map(json_load_array($tFile)); }
+catch (Throwable $e) {
     quiz_abort('Помилка читання tests_export.json', [
         'error' => $e->getMessage(),
         'tests_file' => $tFile,
@@ -351,21 +322,17 @@ function format_mmss(int $sec): string {
     return sprintf('%d:%02d', $m, $s);
 }
 
-/** ✅ NEW: build stable key for passed_items (exam/trainer/etc.) */
 function passed_item_key(array $quiz): string {
     $mode = (string)($quiz['mode'] ?? 'unknown');
     $topic = (string)($quiz['topic'] ?? '');
     $seed = (string)($quiz['seed'] ?? '');
     $mist = !empty($quiz['mistakes_only']) ? 'mistakes' : 'all';
     $tId  = (int)($quiz['test_id'] ?? 0);
-
-    // For exam/trainer we rely on mode+topic+seed; for test mode we keep test_id separately anyway
     return $mode . '|' . $mist . '|' . $topic . '|' . $seed . '|testid=' . $tId;
 }
 
 /** -------- Actions -------- */
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    // ✅ bootstrap expects param
     csrf_verify((string)($_POST['csrf'] ?? null));
 
     $action = (string)($_POST['action'] ?? '');
@@ -376,7 +343,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if ($action === 'start') {
-        $mode = (string)($_POST['mode'] ?? 'test'); // test|exam|trainer
+        $mode = (string)($_POST['mode'] ?? 'test');
         $mode = in_array($mode, ['test','exam','trainer'], true) ? $mode : 'test';
 
         $testId = (int)($_POST['test_id'] ?? 0);
@@ -385,16 +352,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         $title = 'Тест';
         $topic = '';
-        $timeLimit = 1200; // default 20 min for tests/trainer
-        $maxMistakes = 3;  // ✅ NEW: 3 mistakes stop
+        $timeLimit = 1200;
+        $maxMistakes = 3;
 
         $qIds = [];
 
         if ($mode === 'test') {
             $t = $tMap[$testId] ?? null;
-            if (!is_array($t)) {
-                quiz_abort('Тест не знайдено', ['test_id' => $testId]);
-            }
+            if (!is_array($t)) quiz_abort('Тест не знайдено', ['test_id' => $testId]);
 
             $title = (string)($t['title'] ?? 'Тест');
             $topic = (string)($t['topic'] ?? '');
@@ -402,13 +367,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $timeLimit = (int)($t['time_limit_sec'] ?? 1200);
             if ($timeLimit <= 0) $timeLimit = 1200;
 
-            // ignore json mistakes, enforce 3 as requested
             $maxMistakes = 3;
 
             $rawIds = $t['question_ids'] ?? [];
             if (!is_array($rawIds)) $rawIds = [];
 
-            // ✅ Anti-loop / sync: filter through qMap
             $filtered = [];
             $missing = [];
             foreach ($rawIds as $id) {
@@ -432,8 +395,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($mode === 'exam') {
             $title = 'Іспит';
             $topic = 'Контрольний іспит';
-            $timeLimit = 2400; // 40 min
-            $maxMistakes = 3;  // ✅ as requested (3 mistakes stop)
+            $timeLimit = 2400;
+            $maxMistakes = 3;
 
             $all = array_keys($qMap);
             if (count($all) < 40) {
@@ -452,21 +415,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($mode === 'trainer') {
             $title = 'Тренажер';
             $topic = $mistakesOnly ? 'Повтор помилок' : 'Мікс питань';
-            $timeLimit = 1200; // 20 min
+            $timeLimit = 1200;
             $maxMistakes = 3;
 
             $all = array_keys($qMap);
-            if (count($all) < 1) {
-                quiz_abort('Немає питань для тренажера', []);
-            }
+            if (count($all) < 1) quiz_abort('Немає питань для тренажера', []);
 
             if ($mistakesOnly) {
                 $mIds = progress_all_mistakes_ids((string)$uid);
-                // Keep only those that exist
                 $filtered = [];
                 foreach ($mIds as $qid) if (isset($qMap[$qid])) $filtered[] = $qid;
 
-                // If no mistakes yet -> fallback to random mix
                 if (count($filtered) >= 1) {
                     $seed = $seed !== 0 ? $seed : (int)(time() % 1000000);
                     mt_srand($seed);
@@ -524,7 +483,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $qid = (int)$qIds[$idx];
         $q = $qMap[$qid] ?? null;
         if (!is_array($q)) {
-            // skip broken entry
             $quiz['idx'] = min($total, $idx + 1);
             $_SESSION['quiz'] = $quiz;
             quiz_redirect('/account/quiz.php');
@@ -535,7 +493,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         if (!isset($quiz['answers']) || !is_array($quiz['answers'])) $quiz['answers'] = [];
 
-        // Save answer for this idx (prevent re-answer spam)
         if (!array_key_exists((string)$idx, $quiz['answers'])) {
             $quiz['answers'][(string)$idx] = [
                 'qid' => $qid,
@@ -546,15 +503,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             ];
         }
 
-        // ✅ НЕ перелистуємо автоматично: залишаємо idx на поточному питанні
         $_SESSION['quiz'] = $quiz;
 
-        // ✅ auto finish on 3 mistakes
         $mistakes = quiz_count_mistakes($quiz);
         $maxMistakes = (int)($quiz['max_mistakes'] ?? 3);
-        if ($mistakes >= $maxMistakes) {
-            quiz_redirect('/account/quiz.php?action=finish');
-        }
+        if ($mistakes >= $maxMistakes) quiz_redirect('/account/quiz.php?action=finish');
 
         quiz_redirect('/account/quiz.php');
     }
@@ -573,7 +526,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         quiz_redirect('/account/quiz.php');
     }
 
-    // fallback
     quiz_redirect('/account/quiz.php');
 }
 
@@ -602,11 +554,9 @@ if ($action === 'finish') {
     $passed = ($mistakes < $maxMistakes) && ($answered >= $total) && ($total > 0);
     if ($timeLimit > 0 && $spent > $timeLimit) $passed = false;
 
-    // ✅ Persist progress
     $mode = (string)($quiz['mode'] ?? 'test');
     $testId = (int)($quiz['test_id'] ?? 0);
 
-    // collect wrong qids
     $wrongQids = [];
     foreach ($answers as $a) {
         if (!is_array($a)) continue;
@@ -616,13 +566,9 @@ if ($action === 'finish') {
     }
     $wrongQids = array_values(array_filter($wrongQids, fn($x)=> $x>0));
 
-    // store mistakes under test_id when possible, else under 0
     $bucketTestId = ($mode === 'test' && $testId > 0) ? $testId : 0;
-    if (count($wrongQids) > 0) {
-        progress_add_mistakes((string)$uid, $bucketTestId, $wrongQids);
-    }
+    if (count($wrongQids) > 0) progress_add_mistakes((string)$uid, $bucketTestId, $wrongQids);
 
-    // ✅ FIX: mark "passed" not only for tests, but also for exam/trainer
     if ($passed) {
         if ($mode === 'test' && $testId > 0) {
             progress_mark_passed((string)$uid, $testId);
@@ -693,7 +639,6 @@ if ($action === 'finish') {
     exit;
 }
 
-// Default: show current question
 if (!isset($_SESSION['quiz']) || !is_array($_SESSION['quiz']) || !quiz_session_is_valid($_SESSION['quiz'])) {
     quiz_redirect('/account/tests.php');
 }
@@ -704,19 +649,14 @@ $qIds = $quiz['q_ids'] ?? [];
 $idx = (int)($quiz['idx'] ?? 0);
 $total = (int)($quiz['total'] ?? 0);
 
-if (!is_array($qIds) || $total < 1) {
-    quiz_abort('Сесія тесту пошкоджена', ['quiz' => $quiz]);
-}
+if (!is_array($qIds) || $total < 1) quiz_abort('Сесія тесту пошкоджена', ['quiz' => $quiz]);
 
 if ($idx < 0) $idx = 0;
-if ($idx >= $total) {
-    quiz_redirect('/account/quiz.php?action=finish');
-}
+if ($idx >= $total) quiz_redirect('/account/quiz.php?action=finish');
 
 $qid = (int)$qIds[$idx];
 $q = $qMap[$qid] ?? null;
 if (!is_array($q)) {
-    // skip broken
     $quiz['idx'] = min($total, $idx + 1);
     $_SESSION['quiz'] = $quiz;
     quiz_redirect('/account/quiz.php');
@@ -730,21 +670,14 @@ $started = (int)($quiz['started_at'] ?? time());
 $spent = time() - $started;
 $timeLeft = $timeLimit > 0 ? max(0, $timeLimit - $spent) : 0;
 
-// If time over -> finish
-if ($timeLimit > 0 && $spent > $timeLimit) {
-    quiz_redirect('/account/quiz.php?action=finish');
-}
+if ($timeLimit > 0 && $spent > $timeLimit) quiz_redirect('/account/quiz.php?action=finish');
 
-// ✅ auto finish if already 3 mistakes
 $mistakes = quiz_count_mistakes($quiz);
 $maxMistakes = (int)($quiz['max_mistakes'] ?? 3);
-if ($mistakes >= $maxMistakes) {
-    quiz_redirect('/account/quiz.php?action=finish');
-}
+if ($mistakes >= $maxMistakes) quiz_redirect('/account/quiz.php?action=finish');
 
 $csrf = csrf_token();
 
-// current answered?
 $currentAnswer = $answers[(string)$idx] ?? null;
 $alreadyAnswered = is_array($currentAnswer) && isset($currentAnswer['choice']);
 $chosen = $alreadyAnswered ? (int)$currentAnswer['choice'] : 0;
@@ -765,11 +698,29 @@ $topic = (string)($quiz['topic'] ?? '');
     <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=Unbounded:wght@500;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/assets/css/style.css?v=4">
     <style>
-        body{padding-bottom: calc(var(--pp-bottom-h, 120px) + 16px);}
+        /* ✅ IMPORTANT: enough space so bottom fixed bar never covers content (incl. iOS safe-area) */
+        :root{
+            --pp-bottom-h: 160px; /* will be overwritten by JS */
+            --pp-bottom-gap: 18px;
+        }
+
+        body{
+            padding-bottom: calc(var(--pp-bottom-h) + var(--pp-bottom-gap) + env(safe-area-inset-bottom, 0px));
+        }
         html{scroll-behavior:smooth;}
 
         .pp-wrap{max-width:980px;margin:12px auto;padding:0 16px}
-        .pp-card{background:#fff;border-radius:18px;padding:18px;box-shadow:0 8px 30px rgba(0,0,0,0.06);border:1px solid rgba(12,32,22,.06)}
+        .pp-card{
+            background:#fff;border-radius:18px;padding:18px;
+            box-shadow:0 8px 30px rgba(0,0,0,0.06);
+            border:1px solid rgba(12,32,22,.06)
+        }
+
+        /* ✅ ALSO: add extra bottom padding INSIDE card (so options/explain never end under bar) */
+        #quizRoot{
+            padding-bottom: calc(var(--pp-bottom-h) + 14px);
+        }
+
         .pp-head{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:10px}
         .pp-hgroup{display:flex;flex-direction:column;gap:4px}
         .pp-title{font-size:18px;font-weight:900;margin:0}
@@ -778,37 +729,27 @@ $topic = (string)($quiz['topic'] ?? '');
         .pp-img{margin:10px 0}
         .pp-img img{max-width:100%;height:auto;border-radius:14px;display:block;border:1px solid rgba(12,32,22,.08)}
 
-        /* ✅ FIX: force visible text color on options (mobile inherits white from global css) */
+        /* ✅ FIX: visible text on options */
         .pp-opt{
             display:block;width:100%;text-align:left;
             border:1px solid rgba(12,32,22,.10);
-            background:#fff;
-            border-radius:14px;
-            padding:12px 12px;
-            margin:10px 0;
-            cursor:pointer;
-            font-weight:700;
-            color:#0b1b14;              /* ✅ important */
-            -webkit-text-fill-color:#0b1b14; /* ✅ iOS/Safari fallback */
+            background:#fff;border-radius:14px;
+            padding:12px 12px;margin:10px 0;
+            cursor:pointer;font-weight:700;
+            color:#0b1b14;
+            -webkit-text-fill-color:#0b1b14;
         }
         .pp-opt:hover{background:rgba(11,27,20,.03)}
         .pp-opt[disabled]{cursor:default;opacity:1}
+        .pp-opt.is-correct{border-color:rgba(10,122,61,.35);background:rgba(10,122,61,.08);color:#0b1b14;-webkit-text-fill-color:#0b1b14;}
+        .pp-opt.is-wrong{border-color:rgba(180,35,24,.35);background:rgba(180,35,24,.08);color:#0b1b14;-webkit-text-fill-color:#0b1b14;}
 
-        /* keep readable text on colored states too */
-        .pp-opt.is-correct{
-            border-color:rgba(10,122,61,.35);
-            background:rgba(10,122,61,.08);
-            color:#0b1b14;
-            -webkit-text-fill-color:#0b1b14;
+        .pp-explain{
+            margin-top:12px;border-radius:14px;
+            border:1px solid rgba(12,32,22,.10);
+            background:rgba(11,27,20,.02);
+            padding:12px
         }
-        .pp-opt.is-wrong{
-            border-color:rgba(180,35,24,.35);
-            background:rgba(180,35,24,.08);
-            color:#0b1b14;
-            -webkit-text-fill-color:#0b1b14;
-        }
-
-        .pp-explain{margin-top:12px;border-radius:14px;border:1px solid rgba(12,32,22,.10);background:rgba(11,27,20,.02);padding:12px}
         .pp-explain__t{font-weight:900;margin-bottom:6px}
         .pp-explain__b{opacity:.9;font-weight:650;line-height:1.45}
 
@@ -819,9 +760,7 @@ $topic = (string)($quiz['topic'] ?? '');
             border:1px solid rgba(12,32,22,.10);
             background:rgba(11,27,20,.03);
             display:flex;align-items:center;justify-content:center;
-            font-weight:900;
-            color:#0b1b14;              /* ✅ make arrows visible too */
-            -webkit-text-fill-color:#0b1b14;
+            font-weight:900;color:#0b1b14;-webkit-text-fill-color:#0b1b14;
         }
         .pp-navbtn:hover{background:rgba(11,27,20,.06)}
         .pp-strip{flex:1;overflow:hidden}
@@ -829,16 +768,12 @@ $topic = (string)($quiz['topic'] ?? '');
         .pp-strip__inner::-webkit-scrollbar{height:8px}
         .pp-strip__inner::-webkit-scrollbar-thumb{background:rgba(11,27,20,.12);border-radius:99px}
 
-        /* ✅ FIX: force visible numbers inside circles */
         .pp-dot{
             width:34px;height:34px;border-radius:999px;
             border:1px solid rgba(12,32,22,.16);
-            background:#fff;
-            display:flex;align-items:center;justify-content:center;
-            font-weight:900;
-            user-select:none;
-            color:#0b1b14;              /* ✅ important */
-            -webkit-text-fill-color:#0b1b14; /* ✅ iOS/Safari fallback */
+            background:#fff;display:flex;align-items:center;justify-content:center;
+            font-weight:900;user-select:none;
+            color:#0b1b14;-webkit-text-fill-color:#0b1b14;
         }
         .pp-dot.is-current{outline:2px solid rgba(10,122,61,.25);outline-offset:2px}
         .pp-dot.is-ok{border-color:rgba(10,122,61,.35);background:rgba(10,122,61,.10)}
@@ -852,15 +787,13 @@ $topic = (string)($quiz['topic'] ?? '');
             display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;
             border:1px solid rgba(12,32,22,.10);
             background:rgba(11,27,20,.02);
-            border-radius:16px;
-            padding:12px;
+            border-radius:16px;padding:12px;
         }
         .pp-bar__left{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
         .pp-pill{
             background:#fff;border:1px solid rgba(12,32,22,.10);
             border-radius:999px;padding:8px 12px;font-weight:900;
-            color:#0b1b14;              /* ✅ visible text on mobile */
-            -webkit-text-fill-color:#0b1b14;
+            color:#0b1b14;-webkit-text-fill-color:#0b1b14;
         }
         .pp-pill small{opacity:.7;font-weight:800}
         .pp-btn{display:inline-flex;align-items:center;justify-content:center;padding:12px 14px;border-radius:14px;background:#0b1b14;color:#fff;text-decoration:none;border:none;font-weight:900}
@@ -868,12 +801,9 @@ $topic = (string)($quiz['topic'] ?? '');
         .pp-btn:disabled{opacity:.6}
 
         .pp-bottom{
-            position:fixed;
-            left:0;
-            right:0;
-            bottom:0;
-            z-index:50;
+            position:fixed;left:0;right:0;bottom:0;z-index:50;
             padding:12px 16px;
+            padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px)); /* ✅ safe-area */
             background:linear-gradient(to top, #fff 70%, rgba(255,255,255,0));
         }
         .pp-bottom .pp-bar{max-width:980px;margin:0 auto;}
@@ -893,7 +823,6 @@ $topic = (string)($quiz['topic'] ?? '');
          data-timeleft="<?= (int)$timeLeft ?>"
          data-timelimit="<?= (int)$timeLimit ?>">
 
-        <!-- Progress row (top) -->
         <div class="pp-progress">
             <button class="pp-navbtn" type="button" id="ppPrev" aria-label="Ліворуч">‹</button>
             <div class="pp-strip">
@@ -976,7 +905,7 @@ $topic = (string)($quiz['topic'] ?? '');
     </div>
 </div>
 
-<div class="pp-bottom">
+<div class="pp-bottom" id="ppBottom">
     <div class="pp-bar">
         <div class="pp-bar__left">
             <div class="pp-pill"><small>Питання</small> <span><?= (int)($idx+1) ?></span>/<span><?= (int)$total ?></span></div>
@@ -1007,19 +936,35 @@ $topic = (string)($quiz['topic'] ?? '');
 
 <script>
 (function(){
-    // --- Fix fixed bottom bar overlap (set CSS var to its height) ---
-    const bottom = document.querySelector('.pp-bottom');
-    if (bottom) {
-        const h = bottom.offsetHeight || 0;
-        document.documentElement.style.setProperty('--pp-bottom-h', h + 'px');
+    const bottom = document.getElementById('ppBottom');
+    const root = document.getElementById('quizRoot');
+
+    function applyBottomSpace(){
+        if (!bottom) return;
+
+        // Real visual height (includes padding)
+        const h = Math.ceil(bottom.getBoundingClientRect().height || bottom.offsetHeight || 0);
+
+        // Add a small extra gap to be safe in iOS/Telegram
+        const gap = 18;
+
+        document.documentElement.style.setProperty('--pp-bottom-h', (h + gap) + 'px');
+
+        // Also ensure quiz root has enough internal padding so explain/options never hide under bar
+        if (root) {
+            root.style.paddingBottom = 'calc(' + (h + gap) + 'px + 14px)';
+        }
     }
 
-    // --- Always bring viewport to top of quiz card on each load ---
+    applyBottomSpace();
+    window.addEventListener('resize', applyBottomSpace);
+    window.addEventListener('orientationchange', applyBottomSpace);
+
+    // scroll to top on load
     window.scrollTo(0, 0);
 
-    // --- Timer tick each second (mm:ss) ---
+    // Timer tick each second (mm:ss)
     const timerEl = document.getElementById('timerText');
-    const root = document.getElementById('quizRoot');
     if (!timerEl || !root) return;
 
     let left = parseInt(root.getAttribute('data-timeleft') || '0', 10);
@@ -1046,7 +991,7 @@ $topic = (string)($quiz['topic'] ?? '');
         }, 1000);
     }
 
-    // --- Top strip arrows (scroll one "page") ---
+    // Top strip arrows
     const strip = document.getElementById('ppStrip');
     const prev = document.getElementById('ppPrev');
     const next = document.getElementById('ppNext');
@@ -1069,13 +1014,6 @@ $topic = (string)($quiz['topic'] ?? '');
             strip.scrollBy({ left: (r.left - sr.left) - 60, behavior: 'smooth' });
         }
     }
-
-    // Recalc bottom height on resize
-    window.addEventListener('resize', () => {
-        const bottom = document.querySelector('.pp-bottom');
-        if (!bottom) return;
-        document.documentElement.style.setProperty('--pp-bottom-h', (bottom.offsetHeight || 0) + 'px');
-    });
 })();
 </script>
 
