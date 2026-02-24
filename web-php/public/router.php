@@ -1,37 +1,24 @@
 <?php
-// web-php/public/router.php
+$uri = urldecode(parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH));
 
-$uri  = urldecode(parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH));
-$path = rtrim($uri, '/');
+$fullPath = __DIR__ . $uri;
 
-// дефолт
-if ($path === '') $path = '/';
-
-// повний шлях до файла в public
-$file = __DIR__ . $path;
-
-// 1) Якщо запит на існуючий файл (css/js/png/pdf/...) — віддаємо напряму
-if ($path !== '/' && is_file($file)) {
+// якщо існує файл (css/js/png/svg/...) — віддай напряму
+if ($uri !== '/' && is_file($fullPath)) {
     return false;
 }
 
-// 2) Якщо запит на існуючий PHP-файл — виконуємо його напряму
-// Напр: /account/quiz.php -> public/account/quiz.php
-if ($path !== '/' && is_file($file . '.php')) {
-    require $file . '.php';
-    return true;
-}
-if ($path !== '/' && str_ends_with($path, '.php') && is_file($file)) {
-    require $file;
+// якщо існує PHP файл — виконай його
+if ($uri !== '/' && is_file($fullPath) && str_ends_with($uri, '.php')) {
+    require $fullPath;
     return true;
 }
 
-// 3) Якщо є директорія і в ній index.php — відкриваємо її
-// Напр: /account -> public/account/index.php
-if ($path !== '/' && is_dir($file) && is_file($file . '/index.php')) {
-    require $file . '/index.php';
+// якщо запит без .php, але існує file.php — виконай
+if ($uri !== '/' && is_file($fullPath . '.php')) {
+    require $fullPath . '.php';
     return true;
 }
 
-// 4) Інакше — fallback на головний index.php (якщо в тебе є маршрутизація)
+// fallback
 require __DIR__ . '/index.php';
