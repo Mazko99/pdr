@@ -34,7 +34,7 @@ if ($userFirstName !== '') {
 
 <body>
   <!-- Floating buttons -->
-  <a class="float-call" href="tel:+380000000000" aria-label="Зателефонувати">
+  <a class="float-call" href="tel:+380937201995" aria-label="Зателефонувати">
     <span class="float-call__ring"></span>
     <span class="float-call__icon">📞</span>
   </a>

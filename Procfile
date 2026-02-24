@@ -1,1 +1,0 @@
-web: cd web-php && php -S 0.0.0.0:$PORT -t public
