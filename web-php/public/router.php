@@ -1,11 +1,15 @@
 <?php
-$path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
+
+$path = urldecode(parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH));
 $file = __DIR__ . $path;
 
-// віддати статичний файл напряму
-if ($path !== '/' && is_file($file)) {
+// DEBUG (можеш потім прибрати)
+// error_log("Router request: " . $path);
+
+// якщо файл існує — віддати його напряму
+if ($path !== '/' && file_exists($file) && !is_dir($file)) {
     return false;
 }
 
-// інакше — твій фронт-контролер
+// інакше — index.php
 require __DIR__ . '/index.php';
