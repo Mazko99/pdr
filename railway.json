@@ -1,9 +1,7 @@
 {
   "$schema": "https://railway.app/railway.schema.json",
-  "build": {
-    "builder": "NIXPACKS"
-  },
+  "build": { "builder": "NIXPACKS" },
   "deploy": {
-    "startCommand": "cd web-php && php -S 0.0.0.0:$PORT -t public"
+    "startCommand": "sh -lc \"cd web-php && php -S 0.0.0.0:$PORT -t public\""
   }
 }
