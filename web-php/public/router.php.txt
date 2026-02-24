@@ -1,13 +1,13 @@
 <?php
 declare(strict_types=1);
 
-$path = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH);
-$full = __DIR__ . $path;
+$uriPath = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH);
+$fullPath = __DIR__ . $uriPath;
 
-// Якщо це реальний файл (css/js/png/svg/woff2 тощо) — віддай його напряму
-if ($path !== '/' && is_file($full)) {
+// Віддати статичні файли напряму
+if ($uriPath !== '/' && is_file($fullPath)) {
   return false;
 }
 
-// Інакше — все ведемо в головний index.php
+// Все інше — в index.php (твій “контролер”)
 require __DIR__ . '/index.php';
