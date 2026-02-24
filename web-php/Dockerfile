@@ -1,14 +1,16 @@
 FROM php:8.3-cli
 
-WORKDIR /var/www
+WORKDIR /app
+COPY . /app
 
-COPY . /var/www
+# Для стабільності: явно показуємо помилки в stdout
+RUN printf '%s\n' \
+'display_errors=1' \
+'display_startup_errors=1' \
+'error_reporting=E_ALL' \
+'log_errors=1' \
+'error_log=/proc/self/fd/2' \
+> /usr/local/etc/php/conf.d/railway-errors.ini
 
-# optional extensions
-RUN docker-php-ext-install opcache
-
-# permissions
-RUN chown -R www-data:www-data /var/www
-
-# Railway start
-CMD sh -c "php -S 0.0.0.0:${PORT:-8080} -t web-php/public"
+# Стартуємо PHP в правильній папці + лог у stdout
+CMD ["sh", "-lc", "echo \"Starting PHP server on 0.0.0.0:${PORT:-8080}\"; cd /app/web-php/public && php -S 0.0.0.0:${PORT:-8080} index.php"]
