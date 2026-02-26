@@ -22,7 +22,13 @@ if (!$uid) redirect('/login');
 
 // plan
 $plan = strtolower(trim((string)($_POST['plan'] ?? '')));
-$allowed = ['basic']; // ✅ залишили тільки basic
+
+/**
+ * ✅ ДОДАНО 2-й тариф:
+ * - basic  -> 30 днів (як було)
+ * - mini12 -> 12 днів (349 грн)
+ */
+$allowed = ['basic', 'mini12'];
 if (!in_array($plan, $allowed, true)) {
   http_response_code(400);
   echo "Некоректний plan.";
@@ -39,9 +45,21 @@ if (!$user) {
 // ✅ ставимо тариф
 $user['plan'] = $plan;
 
-// ✅ для basic (поки без оплати) можна дати 30 днів
+// ✅ Дати старт підписки (якщо ще не було)
 $user['paid_at'] = $user['paid_at'] ?? gmdate('c');
-$user['expires_at'] = $user['expires_at'] ?? gmdate('c', time() + 30 * 86400);
+
+/**
+ * ✅ Тривалість:
+ * basic  -> 30 днів
+ * mini12 -> 12 днів
+ */
+$days = 30;
+if ($plan === 'mini12') {
+  $days = 12;
+}
+
+// ✅ встановлюємо/оновлюємо дату завершення
+$user['expires_at'] = gmdate('c', time() + $days * 86400);
 
 // ✅ зберігаємо
 if (function_exists('user_update')) {
@@ -60,13 +78,13 @@ if (function_exists('user_update')) {
 
 /**
  * ✅ FIX: не ставимо has_access=true “в лоб”.
- * Краще порахувати доступ із user (basic + expires).
- * Якщо у тебе ще нема user_has_access() — тоді просто true для basic поки.
+ * Краще порахувати доступ із user (plan + expires).
+ * Якщо у тебе ще нема user_has_access() — тоді просто true для дозволених планів.
  */
 if (function_exists('user_has_access')) {
   $_SESSION['has_access'] = user_has_access($user);
 } else {
-  $_SESSION['has_access'] = ($plan === 'basic');
+  $_SESSION['has_access'] = in_array($plan, $allowed, true);
 }
 
 // назад в кабінет (краще конкретний файл, щоб не ловити rewrite-loop)

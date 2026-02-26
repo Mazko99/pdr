@@ -140,3 +140,62 @@ function admin_user_paid_at(array $u): string {
 function admin_user_expires_at(array $u): string {
   return (string)($u['subscription_until'] ?? $u['expires_at'] ?? $u['plan_until'] ?? '—');
 }
+<!-- ADMIN CHAT FLOAT BUTTON -->
+<a href="/admin/chat.php" id="adminChatBtn" style="
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  z-index: 99999;
+  width: 56px;
+  height: 56px;
+  border-radius: 999px;
+  background: #111;
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+  box-shadow: 0 16px 40px rgba(0,0,0,.22);
+  font-size: 20px;
+">
+  💬
+  <span id="adminChatBadge" style="
+    display:none;
+    position:absolute;
+    top:-6px;
+    right:-6px;
+    width:22px;
+    height:22px;
+    border-radius:999px;
+    background:#1FA34A;
+    color:#fff;
+    font-weight:900;
+    font-size:12px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    border:2px solid #fff;
+  ">!</span>
+</a>
+
+<script>
+(function(){
+  async function api(url){
+    const res = await fetch(url, {credentials:'same-origin'});
+    return res.json();
+  }
+  async function tick(){
+    try{
+      const data = await api('/chat_api.php?action=list');
+      if (!data || !data.ok) return;
+      const threads = Array.isArray(data.threads) ? data.threads : [];
+      const hasUnread = threads.some(t => t.unread_admin);
+      const badge = document.getElementById('adminChatBadge');
+      if (!badge) return;
+      badge.style.display = hasUnread ? 'flex' : 'none';
+    }catch(e){}
+  }
+  setInterval(tick, 2500);
+  tick();
+})();
+</script>

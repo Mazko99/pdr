@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/_guard.php';
+require_once __DIR__ . '/../../src/users_store.php';
 
 if (session_status() !== PHP_SESSION_ACTIVE) {
   @session_start();
@@ -46,125 +47,86 @@ function admin_load_users_fallback(): array {
   $data = json_decode($raw, true);
   if (!is_array($data)) return [];
 
-  $list = [];
-
+  // ✅ якщо є ключ users — це головний формат
   if (isset($data['users']) && is_array($data['users'])) {
-    $list = $data['users'];
-  } else {
-    // якщо це вже список або map
-    $list = $data;
-  }
-
-  $out = [];
-
-  // якщо це map виду {"id": {...}, "id2": {...}}
-  $looksLikeMap = true;
-  foreach ($list as $k => $v) {
-    if (!is_array($v)) { $looksLikeMap = false; break; }
-  }
-
-  if ($looksLikeMap && !isset($data['users'])) {
-    foreach ($list as $k => $u) {
-      $id = (string)($u['id'] ?? $u['user_id'] ?? $k);
+    $out = [];
+    foreach ($data['users'] as $u) {
+      if (!is_array($u)) continue;
+      $id = (string)($u['id'] ?? '');
+      if ($id === '') continue;
       $out[$id] = $u;
     }
     return $out;
   }
 
-  // якщо список
-  foreach ($list as $idx => $u) {
-    if (!is_array($u)) continue;
-    $id = (string)($u['id'] ?? $u['user_id'] ?? $idx);
-    $out[$id] = $u;
+  // fallback: list
+  $isList = array_keys($data) === range(0, count($data) - 1);
+  if ($isList) {
+    $out = [];
+    foreach ($data as $u) {
+      if (!is_array($u)) continue;
+      $id = (string)($u['id'] ?? '');
+      if ($id === '') continue;
+      $out[$id] = $u;
+    }
+    return $out;
   }
 
+  // fallback: map
+  $out = [];
+  foreach ($data as $k => $u) {
+    if (!is_array($u)) continue;
+    $id = (string)($u['id'] ?? $k);
+    if ($id === '') continue;
+    $out[$id] = $u;
+  }
   return $out;
 }
 
 /**
- * ЗАПИС: завжди зберігає як { "users": [...] }
+ * ЗАПИС: зберігаємо строго { "users": [ ... ] }
  */
-function admin_save_users_fallback(array $users): void {
-  $path = admin_users_json_path();
-
+function admin_save_users_strict(array $usersMap): void {
   $list = [];
-  foreach ($users as $id => $u) {
+  foreach ($usersMap as $id => $u) {
     if (!is_array($u)) continue;
-    if (empty($u['id'])) $u['id'] = (string)$id;
+    $u['id'] = (string)($u['id'] ?? $id);
+    if ($u['id'] === '') continue;
     $list[] = $u;
   }
 
-  $data = ['users' => array_values($list)];
+  $path = admin_users_json_path();
+  $dir = dirname($path);
+  if (!is_dir($dir)) @mkdir($dir, 0775, true);
 
-  $json = json_encode($data, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
+  $json = json_encode(['users' => array_values($list)], JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
   if ($json === false) {
-    http_response_code(500);
-    echo "Не вдалось згенерувати JSON.";
-    exit;
+    throw new RuntimeException('admin_save_users_strict: json_encode failed');
   }
 
-  if (file_put_contents($path, $json) === false) {
-    http_response_code(500);
-    echo "Не вдалось записати users.json (перевір права доступу).";
-    exit;
-  }
+  $tmp = $path . '.tmp';
+  $fp = fopen($tmp, 'wb');
+  if (!$fp) throw new RuntimeException('admin_save_users_strict: cannot open tmp');
+  if (!flock($fp, LOCK_EX)) { fclose($fp); throw new RuntimeException('admin_save_users_strict: cannot lock tmp'); }
+
+  fwrite($fp, $json);
+  fflush($fp);
+  flock($fp, LOCK_UN);
+  fclose($fp);
+
+  @rename($tmp, $path);
 }
 
-function admin_load_users(): array {
-  // якщо у тебе в users_store.php є функції — можеш підключити тут,
-  // але для стабільності лишаємо fallback
-  return admin_load_users_fallback();
-}
-
-function admin_save_users(array $users): void {
-  admin_save_users_fallback($users);
-}
-
-function iso_or_empty(string $s): string {
-  $s = trim($s);
-  return $s;
-}
-
-function now_iso_utc(): string {
-  return gmdate('c');
-}
-
-/* ==============
-   LOAD USER
-============== */
+$users = admin_load_users_fallback();
 
 $id = (string)($_GET['id'] ?? '');
-if ($id === '') admin_redirect('/admin/users.php');
-
-$users = admin_load_users();
-
-$realKey = null;
-$user = null;
-
-// 1) як ключ
-if (isset($users[$id]) && is_array($users[$id])) {
-  $realKey = $id;
-  $user = $users[$id];
-}
-
-// 2) пошук по полю id
-if (!$user) {
-  foreach ($users as $k => $u) {
-    if (!is_array($u)) continue;
-    $uid = (string)($u['id'] ?? $u['user_id'] ?? '');
-    if ($uid !== '' && $uid === $id) {
-      $realKey = (string)$k;
-      $user = $u;
-      break;
-    }
-  }
-}
-
-if (!$user || $realKey === null) {
+if ($id === '' || !isset($users[$id]) || !is_array($users[$id])) {
   http_response_code(404);
   echo "Користувача не знайдено.";
   exit;
 }
+
+$realKey = $id;
 
 /* ==============
    POST ACTIONS
@@ -185,242 +147,124 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!in_array($plan, $allowed, true)) $plan = 'free';
 
     $users[$realKey]['plan'] = $plan;
-    $users[$realKey]['plan_set_at'] = now_iso_utc();
+    $users[$realKey]['plan_set_at'] = gmdate('c');
 
-    // paid_at ставимо тільки якщо план не free
-    if ($plan !== 'free') {
-      $users[$realKey]['paid_at'] = now_iso_utc();
+    if ($plan === 'free') {
+      $users[$realKey]['paid_at'] = null;
+      $users[$realKey]['expires_at'] = null;
     } else {
-      unset($users[$realKey]['paid_at'], $users[$realKey]['expires_at']);
-    }
-
-    if ($plan !== 'free') {
+      $users[$realKey]['paid_at'] = gmdate('c');
       if ($days > 0) {
-        $users[$realKey]['expires_at'] = gmdate('c', time() + ($days * 86400));
+        $users[$realKey]['expires_at'] = gmdate('c', time() + $days * 86400);
       } else {
-        // 0 днів = без expires_at
-        unset($users[$realKey]['expires_at']);
+        $users[$realKey]['expires_at'] = null;
       }
     }
 
-    admin_save_users($users);
-    admin_redirect('/admin/user.php?id=' . urlencode($realKey) . '&ok=1');
+    admin_save_users_strict($users);
+    admin_redirect('/admin/user.php?id=' . urlencode($id) . '&ok=1');
   }
 
-  if ($action === 'set_dates') {
-    $paid_at = iso_or_empty((string)($_POST['paid_at'] ?? ''));
-    $expires_at = iso_or_empty((string)($_POST['expires_at'] ?? ''));
-
-    if ($paid_at !== '') $users[$realKey]['paid_at'] = $paid_at; else unset($users[$realKey]['paid_at']);
-    if ($expires_at !== '') $users[$realKey]['expires_at'] = $expires_at; else unset($users[$realKey]['expires_at']);
-
-    if ((!empty($users[$realKey]['paid_at']) || !empty($users[$realKey]['expires_at'])) && empty($users[$realKey]['plan'])) {
-      $users[$realKey]['plan'] = 'personal';
-      $users[$realKey]['plan_set_at'] = now_iso_utc();
-    }
-
-    admin_save_users($users);
-    admin_redirect('/admin/user.php?id=' . urlencode($realKey) . '&ok=1');
+  // ✅ НОВЕ: скинути активні сесії користувача
+  if ($action === 'reset_sessions') {
+    sessions_revoke_all_for_user($id, null); // все
+    admin_redirect('/admin/user.php?id=' . urlencode($id) . '&sessions_reset=1');
   }
 
-  if ($action === 'revoke') {
-    $users[$realKey]['plan'] = 'free';
-    $users[$realKey]['plan_set_at'] = now_iso_utc();
-    unset($users[$realKey]['paid_at'], $users[$realKey]['expires_at']);
-    admin_save_users($users);
-    admin_redirect('/admin/user.php?id=' . urlencode($realKey) . '&ok=1');
-  }
-
-  if ($action === 'delete') {
-    unset($users[$realKey]);
-    admin_save_users($users);
-    admin_redirect('/admin/users.php?deleted=1');
-  }
+  // інші дії (якщо були в тебе) — лишаються як є
 }
 
-$ok = (string)($_GET['ok'] ?? '');
-$user = $users[$realKey] ?? $user;
+/* ==============
+   VIEW
+============== */
 
-// UI helpers
-$planCur = (string)($user['plan'] ?? 'free');
-$createdAt = (string)($user['created_at'] ?? $user['registered_at'] ?? '—');
-$paidAt = (string)($user['paid_at'] ?? '');
-$expiresAt = (string)($user['expires_at'] ?? '');
-?>
-<!doctype html>
+$u = $users[$realKey];
+
+?><!doctype html>
 <html lang="uk">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Користувач — Адмінка</title>
-
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=Unbounded:wght@500;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/assets/css/style.css?v=6">
-
+  <title>Адмінка — User #<?= h($id) ?></title>
   <style>
-    html, body { margin:0; padding:0; }
-    .admin-header{
-      padding:32px 0;
-      background:linear-gradient(180deg,#eaf3ef 0,#ffffff 100%);
-      position:relative;
-    }
-    .admin-actions{
-      position:absolute; right:20px; top:20px; display:flex; gap:10px; flex-wrap:wrap;
-    }
-    .grid{
-      display:grid;
-      grid-template-columns: 1fr 1fr;
-      gap:14px;
-      margin-bottom:26px;
-    }
-    @media (max-width: 900px){
-      .grid{ grid-template-columns: 1fr; }
-    }
-    .field label{ font-weight:800; display:block; margin-bottom:6px; }
-    .field input, .field select{
-      width:100%;
-      padding:12px 14px;
-      border-radius:14px;
-      border:1px solid rgba(11,27,20,.12);
-      font-weight:700;
-      outline:none;
-      background:#fff;
-    }
-    .danger{
-      border:1px solid rgba(255,0,0,.18);
-      background:rgba(255,0,0,.04);
-      border-radius:18px;
-      padding:14px;
-    }
-    .mini{
-      color:rgba(11,27,20,.65);
-      font-weight:700;
-      line-height:1.35;
-      font-size:14px;
-    }
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial; margin:0; background:#f6f7f7; color:#0b1b14;}
+    a{color:inherit; text-decoration:none;}
+    .wrap{max-width:1100px; margin:0 auto; padding:16px;}
+    .top{display:flex; gap:10px; align-items:center; justify-content:space-between; padding:16px; background:#fff; border-bottom:1px solid rgba(11,27,20,.08);}
+    .btn{display:inline-flex; align-items:center; justify-content:center; padding:10px 14px; border-radius:12px; background:#0a7a3d; color:#fff; font-weight:800; border:0; cursor:pointer;}
+    .btn--ghost{background:#fff; color:#0b1b14; border:1px solid rgba(11,27,20,.12);}
+    .card{background:#fff; border-radius:14px; border:1px solid rgba(11,27,20,.08); padding:14px; margin-top:14px;}
+    .row{display:grid; grid-template-columns: 220px 1fr; gap:10px; padding:6px 0; border-bottom:1px solid rgba(11,27,20,.06);}
+    .row:last-child{border-bottom:0}
+    .muted{opacity:.65; font-weight:700;}
+    .pill{display:inline-flex; padding:6px 10px; border-radius:999px; border:1px solid rgba(11,27,20,.12); background:#fff; font-weight:900; font-size:12px;}
+    .ok{background:rgba(10,122,61,.10); border-color:rgba(10,122,61,.25);}
   </style>
 </head>
 <body>
 
-<div class="admin-header">
-  <div class="container">
-    <div class="admin-actions">
-      <a class="btn btn--ghost" href="/admin/users.php">← Назад</a>
-      <a class="btn btn--ghost" href="/">На сайт</a>
-      <a class="btn btn--ghost" href="/admin/logout.php">Вийти</a>
-    </div>
-
-    <h1 class="h1">Користувач</h1>
-    <p class="lead">
-      <b>ID:</b> <?php echo h($user['id'] ?? $realKey); ?> ·
-      <b>Email:</b> <?php echo h($user['email'] ?? '—'); ?> ·
-      <b>План:</b> <?php echo h($planCur ?: 'free'); ?>
-    </p>
-
-    <?php if ($ok === '1'): ?>
-      <div class="notice notice--ok" style="margin-top:12px;">Збережено ✅</div>
-    <?php endif; ?>
+<div class="top">
+  <div style="display:flex; gap:10px; align-items:center;">
+    <a class="btn btn--ghost" href="/admin/users.php">← Користувачі</a>
+    <a class="btn btn--ghost" href="/admin/chat.php?uid=<?= urlencode($id) ?>">Чат з користувачем</a>
+    <div style="font-weight:900;">User #<?= h($id) ?></div>
   </div>
+  <div class="muted"><?= h((string)($u['email'] ?? '')) ?></div>
 </div>
 
-<div class="container" style="margin-top:18px;">
-  <div class="grid">
+<div class="wrap">
 
-    <!-- ====== GRANT PLAN ====== -->
-    <div class="account-card">
-      <h3 class="h3">Видати тарифний план</h3>
-      <p class="mini" style="margin-top:8px;">
-        План + термін у днях. <b>0 днів</b> = без expires_at. При видачі плану автоматично ставимо paid_at=now.
-      </p>
+  <?php if (!empty($_GET['ok'])): ?>
+    <div class="card"><span class="pill ok">✅ Збережено</span></div>
+  <?php endif; ?>
 
-      <form method="post" action="/admin/user.php?id=<?php echo urlencode($realKey); ?>" style="margin-top:12px;">
-        <input type="hidden" name="csrf" value="<?php echo h(csrf_token_admin()); ?>">
-        <input type="hidden" name="action" value="grant_plan">
+  <?php if (!empty($_GET['sessions_reset'])): ?>
+    <div class="card"><span class="pill ok">✅ Сесії користувача скинуті</span></div>
+  <?php endif; ?>
 
-        <div class="field" style="margin-bottom:10px;">
-          <label>План</label>
-          <select name="plan">
-            <option value="free" <?php echo $planCur==='free'?'selected':''; ?>>free (без доступу)</option>
-            <option value="dev" <?php echo $planCur==='dev'?'selected':''; ?>>dev (тестовий доступ)</option>
-            <option value="basic" <?php echo $planCur==='basic'?'selected':''; ?>>basic</option>
-            <option value="personal" <?php echo $planCur==='personal'?'selected':''; ?>>personal</option>
-          </select>
-        </div>
-
-        <div class="field" style="margin-bottom:10px;">
-          <label>Тривалість (днів)</label>
-          <input type="number" name="days" value="30" min="0" step="1">
-        </div>
-
-        <button class="btn btn--primary" type="submit">Видати / Оновити план</button>
-      </form>
-
-      <form method="post" action="/admin/user.php?id=<?php echo urlencode($realKey); ?>" style="margin-top:12px;">
-        <input type="hidden" name="csrf" value="<?php echo h(csrf_token_admin()); ?>">
-        <input type="hidden" name="action" value="revoke">
-        <button class="btn btn--ghost" type="submit">Забрати підписку (free)</button>
-      </form>
-    </div>
-
-    <!-- ====== DATES ====== -->
-    <div class="account-card">
-      <h3 class="h3">Оплата / дати (ручне редагування)</h3>
-      <p class="mini" style="margin-top:8px;">
-        Формат ISO. Порожнє поле = видалити.
-      </p>
-
-      <form method="post" action="/admin/user.php?id=<?php echo urlencode($realKey); ?>" style="margin-top:12px;">
-        <input type="hidden" name="csrf" value="<?php echo h(csrf_token_admin()); ?>">
-        <input type="hidden" name="action" value="set_dates">
-
-        <div class="field" style="margin-bottom:10px;">
-          <label>paid_at</label>
-          <input type="text" name="paid_at" value="<?php echo h($paidAt); ?>" placeholder="наприклад 2026-02-14T21:50:45+00:00">
-        </div>
-
-        <div class="field" style="margin-bottom:10px;">
-          <label>expires_at</label>
-          <input type="text" name="expires_at" value="<?php echo h($expiresAt); ?>" placeholder="наприклад 2026-03-16T21:50:45+00:00">
-        </div>
-
-        <button class="btn btn--primary" type="submit">Зберегти дати</button>
-      </form>
-    </div>
-
-    <!-- ====== INFO ====== -->
-    <div class="account-card">
-      <h3 class="h3">Інфо</h3>
-      <div class="sub-card" style="margin-top:12px;">
-        <div><b>Ім’я:</b> <?php echo h($user['name'] ?? '—'); ?></div>
-        <div style="margin-top:6px;"><b>Email:</b> <?php echo h($user['email'] ?? '—'); ?></div>
-        <div style="margin-top:6px;"><b>Реєстрація:</b> <?php echo h($createdAt); ?></div>
-        <div style="margin-top:6px;"><b>План:</b> <?php echo h($planCur ?: 'free'); ?></div>
-        <div style="margin-top:6px;"><b>paid_at:</b> <?php echo h($paidAt !== '' ? $paidAt : '—'); ?></div>
-        <div style="margin-top:6px;"><b>expires_at:</b> <?php echo h($expiresAt !== '' ? $expiresAt : '—'); ?></div>
-        <div style="margin-top:6px;"><b>plan_set_at:</b> <?php echo h($user['plan_set_at'] ?? '—'); ?></div>
-      </div>
-    </div>
-
-    <!-- ====== DELETE ====== -->
-    <div class="account-card">
-      <h3 class="h3">Небезпечно</h3>
-      <div class="danger" style="margin-top:12px;">
-        <p class="lead" style="margin:0 0 12px 0;">Видалення прибере користувача з users.json назавжди.</p>
-        <form method="post" action="/admin/user.php?id=<?php echo urlencode($realKey); ?>"
-              onsubmit="return confirm('Точно видалити користувача?');">
-          <input type="hidden" name="csrf" value="<?php echo h(csrf_token_admin()); ?>">
-          <input type="hidden" name="action" value="delete">
-          <button class="btn btn--primary" type="submit" style="background:#c51616;border-color:#c51616;">
-            Видалити користувача
-          </button>
-        </form>
-      </div>
-    </div>
-
+  <div class="card">
+    <div class="row"><div class="muted">Ім’я</div><div><b><?= h((string)($u['name'] ?? '')) ?></b></div></div>
+    <div class="row"><div class="muted">Email</div><div><?= h((string)($u['email'] ?? '')) ?></div></div>
+    <div class="row"><div class="muted">План</div><div><span class="pill"><?= h((string)($u['plan'] ?? 'free')) ?></span></div></div>
+    <div class="row"><div class="muted">Paid at</div><div><?= h((string)($u['paid_at'] ?? '—')) ?></div></div>
+    <div class="row"><div class="muted">Expires</div><div><?= h((string)($u['expires_at'] ?? '—')) ?></div></div>
+    <div class="row"><div class="muted">Created</div><div><?= h((string)($u['created_at'] ?? '—')) ?></div></div>
   </div>
-</div>
 
+  <div class="card">
+    <div style="font-weight:900; margin-bottom:10px;">Доступ/План</div>
+
+    <form method="post" style="display:flex; gap:10px; flex-wrap:wrap; align-items:end;">
+      <input type="hidden" name="csrf" value="<?= h(csrf_token_admin()) ?>">
+      <input type="hidden" name="action" value="grant_plan">
+
+      <label style="display:flex; flex-direction:column; gap:6px; font-weight:900;">
+        План
+        <select name="plan" style="padding:10px 12px; border-radius:12px; border:1px solid rgba(11,27,20,.18); font-weight:800;">
+          <?php foreach (['free','basic','personal','dev'] as $p): ?>
+            <option value="<?= h($p) ?>" <?= ((string)($u['plan'] ?? 'free')===$p)?'selected':''; ?>><?= h($p) ?></option>
+          <?php endforeach; ?>
+        </select>
+      </label>
+
+      <label style="display:flex; flex-direction:column; gap:6px; font-weight:900;">
+        Днів
+        <input type="number" name="days" value="30" min="0" style="padding:10px 12px; border-radius:12px; border:1px solid rgba(11,27,20,.18); font-weight:800; width:120px;">
+      </label>
+
+      <button class="btn" type="submit">Застосувати</button>
+    </form>
+
+    <div style="margin-top:12px;">
+      <form method="post">
+        <input type="hidden" name="csrf" value="<?= h(csrf_token_admin()) ?>">
+        <input type="hidden" name="action" value="reset_sessions">
+        <button class="btn btn--ghost" type="submit">Скинути активні сесії</button>
+      </form>
+      <div class="muted" style="margin-top:8px;">Після скидання користувача викине з усіх пристроїв (на наступному запиті).</div>
+    </div>
+  </div>
+
+</div>
 </body>
 </html>

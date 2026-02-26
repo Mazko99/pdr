@@ -8,6 +8,8 @@ require __DIR__ . '/../../src/bootstrap.php';
  * ...
  * ✅ FIX (24.02): options text + circle numbers visible on mobile
  * ✅ FIX (24.02 #2): bottom fixed bar DOES NOT cover answers/explain (iOS/Telegram safe-area)
+ * ✅ FIX (26.02): exam/trainer modes from tests.php no longer break ("test_id":0)
+ * ✅ ADD: next test button after finish (for mode=test)
  */
 
 function h(string $s): string { return htmlspecialchars($s, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); }
@@ -158,12 +160,14 @@ function progress_user_get(string $uid): array {
             'passed_tests' => [],
             'passed_items' => [],
             'mistakes' => [],
+            'theory_done' => [],
             'updated_at' => date('c'),
         ];
     }
     if (!isset($u['passed_tests']) || !is_array($u['passed_tests'])) $u['passed_tests'] = [];
     if (!isset($u['passed_items']) || !is_array($u['passed_items'])) $u['passed_items'] = [];
     if (!isset($u['mistakes']) || !is_array($u['mistakes'])) $u['mistakes'] = [];
+    if (!isset($u['theory_done']) || !is_array($u['theory_done'])) $u['theory_done'] = [];
     return $u;
 }
 
@@ -289,11 +293,19 @@ catch (Throwable $e) {
     ]);
 }
 
-try { $tMap = tests_map(json_load_array($tFile)); }
+$testsAllRaw = [];
+try { $testsAllRaw = json_load_array($tFile); }
 catch (Throwable $e) {
     quiz_abort('Помилка читання tests_export.json', [
         'error' => $e->getMessage(),
         'tests_file' => $tFile,
+    ]);
+}
+
+try { $tMap = tests_map($testsAllRaw); }
+catch (Throwable $e) {
+    quiz_abort('Помилка парсингу tests_export.json', [
+        'error' => $e->getMessage(),
     ]);
 }
 
@@ -331,6 +343,70 @@ function passed_item_key(array $quiz): string {
     return $mode . '|' . $mist . '|' . $topic . '|' . $seed . '|testid=' . $tId;
 }
 
+/** ===== Helpers for exam/trainer topic pools (same logic as tests.php) ===== */
+const EXAM_QUESTIONS = 40;
+const EXAM_TIME_SEC  = 40 * 60;
+const EXAM_MISTAKES  = 3;
+const TRAINER_QUESTIONS = 40;
+
+const CUTOFF_TOPIC = 'ДОДАТКОВІ ПИТАННЯ ЩОДО КАТЕГОРІЙ В1, В (БУДОВА І ТЕРМІНИ)';
+
+function cut_tests_until_topic(array $testsAll): array {
+    $out = [];
+    $found = false;
+    foreach ($testsAll as $t) {
+        if (!is_array($t)) continue;
+        $out[] = $t;
+        $topic = (string)($t['topic'] ?? '');
+        if ($topic === CUTOFF_TOPIC) { $found = true; break; }
+    }
+    return $found ? $out : $testsAll;
+}
+
+function build_topic_pools(array $testsAllCut, array $qMap): array {
+    // returns [topicPools, allPool, topicsOrder]
+    $topicsOrder = [];
+    $topicPools = [];
+    $allowedQidSet = [];
+    foreach ($testsAllCut as $t) {
+        if (!is_array($t)) continue;
+        if ((string)($t['type'] ?? 'test') !== 'test') continue;
+        $topic = (string)($t['topic'] ?? 'Без теми');
+        if (!isset($topicsOrder[$topic])) $topicsOrder[$topic] = count($topicsOrder) + 1;
+        if (!isset($topicPools[$topic]) || !is_array($topicPools[$topic])) $topicPools[$topic] = [];
+        $qids = $t['question_ids'] ?? [];
+        if (!is_array($qids)) $qids = [];
+        foreach ($qids as $qid) {
+            $qid = (int)$qid;
+            if ($qid > 0) {
+                $allowedQidSet[$qid] = true;
+                $topicPools[$topic][$qid] = true;
+            }
+        }
+    }
+
+    // finalize topicPools lists
+    $finalTopicPools = [];
+    foreach ($topicPools as $topic => $set) {
+        $ids = [];
+        foreach ($set as $qid => $_) {
+            $qid = (int)$qid;
+            if ($qid > 0 && isset($qMap[$qid])) $ids[] = $qid;
+        }
+        sort($ids);
+        $finalTopicPools[$topic] = $ids;
+    }
+
+    $allPool = [];
+    foreach ($allowedQidSet as $qid => $_) {
+        $qid = (int)$qid;
+        if ($qid > 0 && isset($qMap[$qid])) $allPool[] = $qid;
+    }
+    sort($allPool);
+
+    return [$finalTopicPools, $allPool, array_keys($topicsOrder)];
+}
+
 /** -------- Actions -------- */
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     csrf_verify((string)($_POST['csrf'] ?? null));
@@ -344,11 +420,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if ($action === 'start') {
         $mode = (string)($_POST['mode'] ?? 'test');
-        $mode = in_array($mode, ['test','exam','trainer'], true) ? $mode : 'test';
+
+        // allow modes coming from tests.php
+        $allowedModes = [
+            'test',
+            'exam', 'exam_mix', 'exam_topic',
+            'trainer', 'trainer_mix', 'trainer_topic',
+        ];
+        if (!in_array($mode, $allowedModes, true)) $mode = 'test';
 
         $testId = (int)($_POST['test_id'] ?? 0);
         $seed = (int)($_POST['seed'] ?? 0);
         $mistakesOnly = !empty($_POST['mistakes_only']);
+
+        // optional for topic modes
+        $topicReq = trim((string)($_POST['topic'] ?? ''));
+        $partReq  = (int)($_POST['part'] ?? 1);
 
         $title = 'Тест';
         $topic = '';
@@ -392,34 +479,86 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $qIds = array_values($filtered);
         }
 
-        if ($mode === 'exam') {
+        // ===== EXAM MIX / EXAM TOPIC =====
+        if ($mode === 'exam' || $mode === 'exam_mix') {
             $title = 'Іспит';
-            $topic = 'Контрольний іспит';
-            $timeLimit = 2400;
-            $maxMistakes = 3;
+            $topic = 'Змішаний іспит';
+            $timeLimit = EXAM_TIME_SEC;
+            $maxMistakes = EXAM_MISTAKES;
 
-            $all = array_keys($qMap);
-            if (count($all) < 40) {
+            $testsCut = cut_tests_until_topic($testsAllRaw);
+            [$topicPools, $allPool] = build_topic_pools($testsCut, $qMap);
+
+            if (count($allPool) < EXAM_QUESTIONS) {
                 quiz_abort('Недостатньо питань для іспиту', [
-                    'total_questions_available' => count($all),
-                    'need' => 40,
+                    'total_questions_available' => count($allPool),
+                    'need' => EXAM_QUESTIONS,
                 ]);
             }
 
             if ($seed === 0) $seed = 777;
             mt_srand($seed);
-            shuffle($all);
-            $qIds = array_slice($all, 0, 40);
+            $tmp = $allPool;
+            shuffle($tmp);
+            $qIds = array_slice($tmp, 0, EXAM_QUESTIONS);
         }
 
-        if ($mode === 'trainer') {
+        if ($mode === 'exam_topic') {
+            $title = 'Іспит';
+            $timeLimit = EXAM_TIME_SEC;
+            $maxMistakes = EXAM_MISTAKES;
+
+            $testsCut = cut_tests_until_topic($testsAllRaw);
+            [$topicPools] = build_topic_pools($testsCut, $qMap);
+
+            if ($topicReq === '' || !isset($topicPools[$topicReq])) {
+                quiz_abort('Тема для іспиту не знайдена', [
+                    'topic' => $topicReq,
+                ]);
+            }
+
+            $pool = $topicPools[$topicReq];
+            if (count($pool) < 1) {
+                quiz_abort('У темі немає питань для іспиту', [
+                    'topic' => $topicReq,
+                    'pool_count' => count($pool),
+                ]);
+            }
+
+            $part = max(1, $partReq);
+            $offset = ($part - 1) * EXAM_QUESTIONS;
+            $slice = array_slice($pool, $offset, EXAM_QUESTIONS);
+
+            // якщо в темі менше — беремо скільки є
+            if (count($slice) < 1) {
+                quiz_abort('Частина іспиту порожня (part занадто велика)', [
+                    'topic' => $topicReq,
+                    'part' => $part,
+                    'pool_count' => count($pool),
+                    'need_per_part' => EXAM_QUESTIONS,
+                ]);
+            }
+
+            $topic = $topicReq . ' (частина ' . $part . ')';
+
+            // перемішати в межах частини, але стабільно по seed
+            if ($seed === 0) $seed = (int)abs(crc32($topicReq . '|' . $part . '|exam'));
+            mt_srand($seed);
+            shuffle($slice);
+            $qIds = $slice;
+        }
+
+        // ===== TRAINER MIX / TRAINER TOPIC / TRAINER mistakes =====
+        if ($mode === 'trainer' || $mode === 'trainer_mix') {
             $title = 'Тренажер';
             $topic = $mistakesOnly ? 'Повтор помилок' : 'Мікс питань';
             $timeLimit = 1200;
             $maxMistakes = 3;
 
-            $all = array_keys($qMap);
-            if (count($all) < 1) quiz_abort('Немає питань для тренажера', []);
+            $testsCut = cut_tests_until_topic($testsAllRaw);
+            [$topicPools, $allPool] = build_topic_pools($testsCut, $qMap);
+
+            if (count($allPool) < 1) quiz_abort('Немає питань для тренажера', []);
 
             if ($mistakesOnly) {
                 $mIds = progress_all_mistakes_ids((string)$uid);
@@ -430,19 +569,55 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $seed = $seed !== 0 ? $seed : (int)(time() % 1000000);
                     mt_srand($seed);
                     shuffle($filtered);
-                    $qIds = array_slice($filtered, 0, min(40, count($filtered)));
+                    $qIds = array_slice($filtered, 0, min(TRAINER_QUESTIONS, count($filtered)));
                 } else {
                     $seed = $seed !== 0 ? $seed : 777;
                     mt_srand($seed);
-                    shuffle($all);
-                    $qIds = array_slice($all, 0, min(20, count($all)));
+                    $tmp = $allPool;
+                    shuffle($tmp);
+                    $qIds = array_slice($tmp, 0, min(TRAINER_QUESTIONS, count($tmp)));
                 }
             } else {
                 $seed = $seed !== 0 ? $seed : 777;
                 mt_srand($seed);
-                shuffle($all);
-                $qIds = array_slice($all, 0, min(20, count($all)));
+                $tmp = $allPool;
+                shuffle($tmp);
+                $qIds = array_slice($tmp, 0, min(TRAINER_QUESTIONS, count($tmp)));
             }
+        }
+
+        if ($mode === 'trainer_topic') {
+            $title = 'Тренажер';
+            $timeLimit = 1200;
+            $maxMistakes = 3;
+
+            $testsCut = cut_tests_until_topic($testsAllRaw);
+            [$topicPools] = build_topic_pools($testsCut, $qMap);
+
+            if ($topicReq === '' || !isset($topicPools[$topicReq])) {
+                quiz_abort('Тема для тренажера не знайдена', [
+                    'topic' => $topicReq,
+                ]);
+            }
+            $pool = $topicPools[$topicReq];
+            if (count($pool) < 1) quiz_abort('У темі немає питань для тренажера', ['topic' => $topicReq]);
+
+            $seed = $seed !== 0 ? $seed : (int)random_int(1, 1000000000);
+            mt_srand($seed);
+            $tmp = $pool;
+            shuffle($tmp);
+
+            $topic = $topicReq;
+            $qIds = array_slice($tmp, 0, min(TRAINER_QUESTIONS, count($tmp)));
+        }
+
+        if (!is_array($qIds) || count($qIds) < 1) {
+            quiz_abort('Не вдалося сформувати список питань', [
+                'mode' => $mode,
+                'test_id' => $testId,
+                'topic' => $topicReq,
+                'part' => $partReq,
+            ]);
         }
 
         $_SESSION['quiz'] = [
@@ -459,6 +634,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'time_limit_sec' => $timeLimit,
             'seed' => $seed,
             'mistakes_only' => $mistakesOnly ? 1 : 0,
+            'topic_req' => $topicReq,
+            'part_req' => $partReq,
         ];
 
         quiz_redirect('/account/quiz.php');
@@ -580,6 +757,37 @@ if ($action === 'finish') {
         }
     }
 
+    // ✅ NEXT TEST button (only for normal tests)
+    $nextTestId = 0;
+    $nextTestTitle = '';
+    if ($mode === 'test' && $passed && $testId > 0) {
+        $cur = $tMap[$testId] ?? null;
+        if (is_array($cur)) {
+            $curTopic = (string)($cur['topic'] ?? '');
+            // keep original order from tests_export.json
+            $idsInOrder = [];
+            foreach ($testsAllRaw as $t) {
+                if (!is_array($t)) continue;
+                if ((string)($t['type'] ?? 'test') !== 'test') continue;
+                $tid = (int)($t['id'] ?? 0);
+                if ($tid > 0) $idsInOrder[] = $tid;
+            }
+            $pos = array_search($testId, $idsInOrder, true);
+            if ($pos !== false) {
+                for ($i = $pos + 1; $i < count($idsInOrder); $i++) {
+                    $tid2 = (int)$idsInOrder[$i];
+                    $t2 = $tMap[$tid2] ?? null;
+                    if (!is_array($t2)) continue;
+                    if ((string)($t2['topic'] ?? '') !== $curTopic) break; // next topic -> stop
+                    // next test in same topic
+                    $nextTestId = $tid2;
+                    $nextTestTitle = (string)($t2['title'] ?? 'Наступний тест');
+                    break;
+                }
+            }
+        }
+    }
+
     $csrf = csrf_token();
     ?>
     <!doctype html>
@@ -628,6 +836,17 @@ if ($action === 'finish') {
                     <input type="hidden" name="action" value="reset">
                     <button class="pp-btn" type="submit">Завершити та вийти</button>
                 </form>
+
+                <?php if ($nextTestId > 0): ?>
+                    <form method="post" action="/account/quiz.php" style="margin:0">
+                        <input type="hidden" name="csrf" value="<?= h($csrf) ?>">
+                        <input type="hidden" name="action" value="start">
+                        <input type="hidden" name="mode" value="test">
+                        <input type="hidden" name="test_id" value="<?= (int)$nextTestId ?>">
+                        <button class="pp-btn" type="submit">Перейти до наступного тесту →</button>
+                    </form>
+                <?php endif; ?>
+
                 <a class="pp-btn2" href="/account/tests.php">До списку тестів</a>
                 <a class="pp-btn2" href="/account/index.php">В кабінет</a>
             </div>
@@ -942,15 +1161,11 @@ $topic = (string)($quiz['topic'] ?? '');
     function applyBottomSpace(){
         if (!bottom) return;
 
-        // Real visual height (includes padding)
         const h = Math.ceil(bottom.getBoundingClientRect().height || bottom.offsetHeight || 0);
-
-        // Add a small extra gap to be safe in iOS/Telegram
         const gap = 18;
 
         document.documentElement.style.setProperty('--pp-bottom-h', (h + gap) + 'px');
 
-        // Also ensure quiz root has enough internal padding so explain/options never hide under bar
         if (root) {
             root.style.paddingBottom = 'calc(' + (h + gap) + 'px + 14px)';
         }
@@ -960,10 +1175,8 @@ $topic = (string)($quiz['topic'] ?? '');
     window.addEventListener('resize', applyBottomSpace);
     window.addEventListener('orientationchange', applyBottomSpace);
 
-    // scroll to top on load
     window.scrollTo(0, 0);
 
-    // Timer tick each second (mm:ss)
     const timerEl = document.getElementById('timerText');
     if (!timerEl || !root) return;
 
@@ -991,7 +1204,6 @@ $topic = (string)($quiz['topic'] ?? '');
         }, 1000);
     }
 
-    // Top strip arrows
     const strip = document.getElementById('ppStrip');
     const prev = document.getElementById('ppPrev');
     const next = document.getElementById('ppNext');
@@ -1005,7 +1217,6 @@ $topic = (string)($quiz['topic'] ?? '');
     if (prev) prev.addEventListener('click', () => scrollByAmount(-1));
     if (next) next.addEventListener('click', () => scrollByAmount(+1));
 
-    // Auto-scroll to current dot
     const currentDot = strip ? strip.querySelector('.pp-dot.is-current') : null;
     if (strip && currentDot) {
         const r = currentDot.getBoundingClientRect();

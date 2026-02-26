@@ -5,6 +5,222 @@ if (session_status() !== PHP_SESSION_ACTIVE) {
   @session_start();
 }
 
+/**
+ * ===========================
+ * INLINE CHAT API (same file)
+ * ===========================
+ * Endpoints:
+ *   GET  ?chat_api=1&action=fetch[&thread=...]
+ *   POST ?chat_api=1&action=send[&thread=...]
+ *
+ * Storage:
+ *   /data/chat_threads/<threadId>.json
+ *
+ * Admin mode:
+ *   $_SESSION['is_admin'] === true
+ */
+if (isset($_GET['chat_api']) && (string)$_GET['chat_api'] === '1') {
+  header('Content-Type: application/json; charset=utf-8');
+  header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+
+  $isAdmin = !empty($_SESSION['is_admin']) && $_SESSION['is_admin'] === true;
+
+  // thread id for user: user_id if authed, else session id
+  $isAuthedApi = !empty($_SESSION['user_id']);
+  $defaultThread = $isAuthedApi ? ('u_' . (string)$_SESSION['user_id']) : ('g_' . session_id());
+
+  $action = (string)($_GET['action'] ?? '');
+  if ($action === '') {
+    http_response_code(400);
+    echo json_encode(['ok' => false, 'error' => 'Missing action'], JSON_UNESCAPED_UNICODE);
+    exit;
+  }
+
+  $baseDir = __DIR__ . '/data/chat_threads';
+  if (!is_dir($baseDir)) {
+    @mkdir($baseDir, 0775, true);
+  }
+
+  $safeThread = function (string $thread): string {
+    // allow only a-zA-Z0-9 _ -
+    $thread = preg_replace('/[^a-zA-Z0-9_\-]/', '', $thread) ?? '';
+    if ($thread === '') {
+      $thread = 'invalid';
+    }
+    return $thread;
+  };
+
+  $threadId = $defaultThread;
+  if ($isAdmin && isset($_GET['thread'])) {
+    $threadId = (string)$_GET['thread'];
+  }
+  $threadId = $safeThread($threadId);
+
+  $threadFile = $baseDir . '/' . $threadId . '.json';
+
+  $readThread = function (string $file): array {
+    if (!is_file($file)) return ['thread' => null, 'messages' => [], 'meta' => []];
+    $raw = @file_get_contents($file);
+    if (!is_string($raw) || $raw === '') return ['thread' => null, 'messages' => [], 'meta' => []];
+    $data = json_decode($raw, true);
+    if (!is_array($data)) return ['thread' => null, 'messages' => [], 'meta' => []];
+    if (!isset($data['messages']) || !is_array($data['messages'])) $data['messages'] = [];
+    if (!isset($data['meta']) || !is_array($data['meta'])) $data['meta'] = [];
+    return $data;
+  };
+
+  $writeThread = function (string $file, array $data): bool {
+    $json = json_encode($data, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
+    if (!is_string($json)) return false;
+    $tmp = $file . '.tmp';
+    $ok = @file_put_contents($tmp, $json, LOCK_EX);
+    if ($ok === false) return false;
+    return @rename($tmp, $file);
+  };
+
+  $listThreads = function (string $dir): array {
+    if (!is_dir($dir)) return [];
+    $files = glob($dir . '/*.json');
+    if (!is_array($files)) return [];
+    $threads = [];
+    foreach ($files as $f) {
+      $bn = basename($f, '.json');
+      $mtime = @filemtime($f);
+      $threads[] = [
+        'thread' => $bn,
+        'updated_at' => is_int($mtime) ? $mtime : 0,
+      ];
+    }
+    usort($threads, static function ($a, $b) {
+      return ($b['updated_at'] ?? 0) <=> ($a['updated_at'] ?? 0);
+    });
+    return $threads;
+  };
+
+  $now = time();
+
+  if ($action === 'list') {
+    if (!$isAdmin) {
+      http_response_code(403);
+      echo json_encode(['ok' => false, 'error' => 'Forbidden'], JSON_UNESCAPED_UNICODE);
+      exit;
+    }
+    echo json_encode(['ok' => true, 'threads' => $listThreads($baseDir)], JSON_UNESCAPED_UNICODE);
+    exit;
+  }
+
+  if ($action === 'fetch') {
+    $data = $readThread($threadFile);
+
+    // Ensure meta exists
+    if (!isset($data['meta']['created_at'])) $data['meta']['created_at'] = $now;
+    if (!isset($data['meta']['updated_at'])) $data['meta']['updated_at'] = $now;
+
+    // For regular user, do not allow reading чужих thread'ів
+    if (!$isAdmin) {
+      if ($threadId !== $safeThread($defaultThread)) {
+        http_response_code(403);
+        echo json_encode(['ok' => false, 'error' => 'Forbidden'], JSON_UNESCAPED_UNICODE);
+        exit;
+      }
+    }
+
+    echo json_encode([
+      'ok' => true,
+      'thread' => $threadId,
+      'is_admin' => $isAdmin,
+      'messages' => $data['messages'],
+      'meta' => $data['meta'],
+    ], JSON_UNESCAPED_UNICODE);
+    exit;
+  }
+
+  if ($action === 'send') {
+    if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+      http_response_code(405);
+      echo json_encode(['ok' => false, 'error' => 'Method not allowed'], JSON_UNESCAPED_UNICODE);
+      exit;
+    }
+
+    // For regular user, do not allow sending to чужих thread'ів
+    if (!$isAdmin) {
+      if ($threadId !== $safeThread($defaultThread)) {
+        http_response_code(403);
+        echo json_encode(['ok' => false, 'error' => 'Forbidden'], JSON_UNESCAPED_UNICODE);
+        exit;
+      }
+    }
+
+    $payload = [];
+    $rawBody = file_get_contents('php://input');
+    if (is_string($rawBody) && $rawBody !== '') {
+      $decoded = json_decode($rawBody, true);
+      if (is_array($decoded)) {
+        $payload = $decoded;
+      }
+    }
+    if (empty($payload)) {
+      $payload = $_POST;
+    }
+
+    $text = trim((string)($payload['text'] ?? ''));
+    if ($text === '') {
+      http_response_code(400);
+      echo json_encode(['ok' => false, 'error' => 'Empty message'], JSON_UNESCAPED_UNICODE);
+      exit;
+    }
+    if (mb_strlen($text, 'UTF-8') > 2000) {
+      $text = mb_substr($text, 0, 2000, 'UTF-8');
+    }
+
+    $data = $readThread($threadFile);
+
+    if (!isset($data['meta']['created_at'])) $data['meta']['created_at'] = $now;
+    $data['meta']['updated_at'] = $now;
+
+    // Identify sender
+    $senderRole = $isAdmin ? 'admin' : 'user';
+    $senderName = $isAdmin ? (string)($_SESSION['user_name'] ?? 'Адмін') : (string)($_SESSION['user_name'] ?? 'Користувач');
+    $senderEmail = $isAdmin ? (string)($_SESSION['user_email'] ?? '') : (string)($_SESSION['user_email'] ?? '');
+
+    $msg = [
+      'id' => bin2hex(random_bytes(8)),
+      'ts' => $now,
+      'role' => $senderRole,
+      'name' => $senderName,
+      'email' => $senderEmail,
+      'text' => $text,
+    ];
+
+    $data['messages'][] = $msg;
+
+    // Hard cap to avoid huge files
+    if (count($data['messages']) > 300) {
+      $data['messages'] = array_slice($data['messages'], -300);
+    }
+
+    $ok = $writeThread($threadFile, $data);
+    if (!$ok) {
+      http_response_code(500);
+      echo json_encode(['ok' => false, 'error' => 'Failed to save'], JSON_UNESCAPED_UNICODE);
+      exit;
+    }
+
+    echo json_encode(['ok' => true, 'message' => $msg, 'thread' => $threadId], JSON_UNESCAPED_UNICODE);
+    exit;
+  }
+
+  http_response_code(400);
+  echo json_encode(['ok' => false, 'error' => 'Unknown action'], JSON_UNESCAPED_UNICODE);
+  exit;
+}
+
+/**
+ * ===========================
+ * PAGE (normal rendering)
+ * ===========================
+ */
+
 $isAuthed = !empty($_SESSION['user_id']);
 $userNameRaw = (string)($_SESSION['user_name'] ?? '');
 $userEmail = (string)($_SESSION['user_email'] ?? '');
@@ -16,6 +232,8 @@ if ($userFirstName !== '') {
 } else {
   $userFirstName = 'Акаунт';
 }
+
+$isAdminUi = !empty($_SESSION['is_admin']) && $_SESSION['is_admin'] === true;
 ?>
 <!doctype html>
 <html lang="uk">
@@ -30,14 +248,188 @@ if ($userFirstName !== '') {
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=Unbounded:wght@500;700&display=swap" rel="stylesheet">
 
   <link rel="stylesheet" href="/assets/css/style.css?v=4" />
+
+  <!-- Chat styles (inline to avoid editing style.css) -->
+  <style>
+    .float-chat {
+      position: fixed;
+      right: 18px;
+      bottom: 18px;
+      z-index: 9999;
+      width: 56px;
+      height: 56px;
+      border-radius: 999px;
+      border: 0;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: #1FA34A;
+      color: #fff;
+      box-shadow: 0 16px 40px rgba(0,0,0,.22);
+    }
+    .float-chat__ring {
+      position: absolute;
+      inset: -6px;
+      border-radius: 999px;
+      border: 2px solid rgba(31,163,74,.35);
+      animation: chatPulse 1.8s infinite;
+    }
+    @keyframes chatPulse {
+      0% { transform: scale(.95); opacity: .65; }
+      70% { transform: scale(1.15); opacity: 0; }
+      100% { transform: scale(1.15); opacity: 0; }
+    }
+    .float-chat__icon { position: relative; font-size: 22px; line-height: 1; }
+
+    .chatbox {
+      position: fixed;
+      right: 18px;
+      bottom: 86px;
+      width: min(380px, calc(100vw - 36px));
+      height: 520px;
+      max-height: calc(100vh - 140px);
+      z-index: 9999;
+      border-radius: 18px;
+      overflow: hidden;
+      background: #0F1411;
+      box-shadow: 0 22px 70px rgba(0,0,0,.35);
+      display: none;
+    }
+    .chatbox.is-open { display: flex; flex-direction: column; }
+
+    .chatbox__head {
+      padding: 14px 14px 12px;
+      background: rgba(255,255,255,.06);
+      border-bottom: 1px solid rgba(255,255,255,.10);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .chatbox__title { color: #fff; font-weight: 800; font-family: Unbounded, Manrope, system-ui; font-size: 14px; }
+    .chatbox__sub { color: rgba(255,255,255,.72); font-size: 12px; margin-top: 2px; }
+    .chatbox__head-left { display: flex; flex-direction: column; line-height: 1.15; }
+    .chatbox__close {
+      margin-left: auto;
+      width: 34px;
+      height: 34px;
+      border-radius: 10px;
+      border: 1px solid rgba(255,255,255,.14);
+      background: rgba(255,255,255,.06);
+      color: #fff;
+      cursor: pointer;
+    }
+
+    .chatbox__body {
+      flex: 1;
+      padding: 12px;
+      overflow: auto;
+      background: radial-gradient(1200px 600px at 80% -10%, rgba(31,163,74,.20), transparent 60%),
+                  radial-gradient(1200px 600px at 10% 120%, rgba(31,163,74,.12), transparent 55%),
+                  #0F1411;
+    }
+
+    .chatmsg {
+      display: flex;
+      margin: 10px 0;
+      gap: 10px;
+      align-items: flex-end;
+    }
+    .chatmsg--user { justify-content: flex-end; }
+    .chatmsg--admin { justify-content: flex-start; }
+
+    .chatmsg__bubble {
+      max-width: 82%;
+      padding: 10px 12px;
+      border-radius: 14px;
+      font-size: 14px;
+      line-height: 1.3;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+      border: 1px solid rgba(255,255,255,.10);
+    }
+    .chatmsg--user .chatmsg__bubble {
+      background: rgba(31,163,74,.18);
+      color: #fff;
+      border-color: rgba(31,163,74,.30);
+      border-bottom-right-radius: 6px;
+    }
+    .chatmsg--admin .chatmsg__bubble {
+      background: rgba(255,255,255,.08);
+      color: #fff;
+      border-bottom-left-radius: 6px;
+    }
+    .chatmsg__meta {
+      font-size: 11px;
+      color: rgba(255,255,255,.55);
+      margin-top: 6px;
+    }
+
+    .chatbox__foot {
+      padding: 10px;
+      border-top: 1px solid rgba(255,255,255,.10);
+      background: rgba(255,255,255,.06);
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 10px;
+      align-items: center;
+    }
+    .chatbox__input {
+      width: 100%;
+      resize: none;
+      height: 42px;
+      max-height: 120px;
+      padding: 10px 12px;
+      border-radius: 12px;
+      border: 1px solid rgba(255,255,255,.16);
+      background: rgba(0,0,0,.22);
+      color: #fff;
+      outline: none;
+      font-family: Manrope, system-ui;
+      font-size: 14px;
+    }
+    .chatbox__send {
+      height: 42px;
+      padding: 0 14px;
+      border-radius: 12px;
+      border: 0;
+      background: #1FA34A;
+      color: #fff;
+      font-weight: 800;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+
+    .chatadmin {
+      display: none;
+      padding: 10px 12px;
+      border-top: 1px solid rgba(255,255,255,.10);
+      background: rgba(0,0,0,.18);
+    }
+    .chatadmin.is-on { display: flex; gap: 10px; align-items: center; }
+    .chatadmin__label { color: rgba(255,255,255,.70); font-size: 12px; }
+    .chatadmin__select {
+      flex: 1;
+      height: 36px;
+      border-radius: 10px;
+      border: 1px solid rgba(255,255,255,.16);
+      background: rgba(0,0,0,.22);
+      color: #fff;
+      outline: none;
+      padding: 0 10px;
+      font-family: Manrope, system-ui;
+      font-size: 13px;
+    }
+  </style>
 </head>
 
 <body>
   <!-- Floating buttons -->
-  <a class="float-call" href="tel:+380937201995" aria-label="Зателефонувати">
-    <span class="float-call__ring"></span>
-    <span class="float-call__icon">📞</span>
-  </a>
+  <!-- ✅ Replaced phone call with online chat -->
+  <button class="float-chat" type="button" aria-label="Онлайн чат" data-chat-open>
+    <span class="float-chat__ring"></span>
+    <span class="float-chat__icon">💬</span>
+  </button>
 
   <button class="float-top" type="button" aria-label="Вгору" data-scroll-top>
     ↑
@@ -59,7 +451,6 @@ if ($userFirstName !== '') {
 
       <div class="header__actions">
         <?php if (!$isAuthed): ?>
-          <!-- ✅ правка: додав клас header__trial -->
           <a class="btn btn--ghost header__cta-hide-mobile header__trial" href="#demo">Тестовий доступ на 3 дні</a>
           <a class="btn btn--primary header__cta-hide-mobile" href="/login">увійти</a>
         <?php else: ?>
@@ -155,7 +546,6 @@ if ($userFirstName !== '') {
         </div>
       </div>
 
-      <!-- ribbon / announcement -->
       <div class="ribbon">
         <div class="ribbon__track">
           <span>тестовий доступ 3 дні • режим іспиту • пояснення • статистика • повтор помилок</span>
@@ -207,7 +597,7 @@ if ($userFirstName !== '') {
       </div>
     </section>
 
-    <!-- Why prepare / Program -->
+    <!-- Program / Pricing -->
     <section class="section section--soft" id="program">
       <div class="container">
         <h2 class="h2">Чому варто готуватись з ProstoPDR</h2>
@@ -273,23 +663,35 @@ if ($userFirstName !== '') {
               </div>
             </article>
 
+            <!-- ✅ План на 12 днів: тепер 2 кнопки як у 699 -->
             <article class="plan plan--personal">
-              <h3 class="plan__title">Персональний план</h3>
+              <h3 class="plan__title">План на 12 днів</h3>
               <p class="plan__desc">
-                Індивідуальний маршрут: тренування по твоїх слабких темах, рекомендації й контроль прогресу.
+                Доступ до тестів ПДР, режиму «іспит», пояснень та статистики. Підписку можна скасувати у будь-який момент.
               </p>
 
-              <div class="plan__media">
-                <img src="/assets/img/plan-personal.png" alt="" />
+              <div class="plan__price">
+                <span class="plan__amount">349,00 грн</span><span class="plan__period">/12 днів</span>
               </div>
 
-              <ol class="plan__steps">
-                <li>Швидкий старт-тест — визначимо твій рівень</li>
-                <li>План підготовки — теми та вправи під тебе</li>
-                <li>Повтор помилок — автоматично підкидаємо те, що «просідає»</li>
-              </ol>
+              <div class="plan__banner">
+                <span class="dot dot--ok">✓</span>
+                Доступ діє 12 днів з моменту оплати. Активується одразу після оплати.
+              </div>
 
-              <a class="btn btn--accent plan__cta plan__cta--single" href="/checkout?plan=personal">Обрати</a>
+              <ul class="plan__list">
+                <li>Тести ПДР з поясненнями</li>
+                <li>Режим «іспит» з таймером</li>
+                <li>Повторення помилок та «слабкі теми»</li>
+                <li>Статистика прогресу по днях</li>
+                <li>Доступ з телефону/ПК у будь-який час</li>
+                <li>Нотатки до питань та тем</li>
+              </ul>
+
+              <div class="plan__cta-row">
+                <a class="btn btn--ghost plan__cta" href="/demo">Отримати 3 дні безкоштовно</a>
+                <a class="btn btn--primary plan__cta" href="/checkout?plan=mini12">Обрати</a>
+              </div>
             </article>
           </div>
         </div>
@@ -310,7 +712,7 @@ if ($userFirstName !== '') {
       </div>
     </section>
 
-    <!-- Steps / Process (НЕ ВИРІЗАВ, ЛИШАЄТЬСЯ 7 КРОКІВ) -->
+    <!-- Steps -->
     <section class="section">
       <div class="container">
         <h2 class="h2">Процес підготовки в ProstoPDR</h2>
@@ -328,7 +730,7 @@ if ($userFirstName !== '') {
 
           <article class="big-step">
             <div class="big-step__left">
-              <h3 class="big-step__title">Крок 2: Обираєш тариф: базовий або персональний план.</h3>
+              <h3 class="big-step__title">Крок 2: Обираєш тариф: базовий або план на 12 днів.</h3>
               <div class="big-step__badge">2</div>
             </div>
             <div class="big-step__right">
@@ -338,8 +740,8 @@ if ($userFirstName !== '') {
                   <div class="mini-card__text">Тести + іспит + пояснення</div>
                 </div>
                 <div class="mini-card">
-                  <div class="mini-card__title">Персональний план</div>
-                  <div class="mini-card__text">Маршрут по слабких темах</div>
+                  <div class="mini-card__title">План на 12 днів</div>
+                  <div class="mini-card__text">Повний доступ на 12 днів</div>
                 </div>
               </div>
             </div>
@@ -459,11 +861,11 @@ if ($userFirstName !== '') {
           </div>
 
           <button class="faq__item" type="button" data-faq-item>
-            <span>Чим відрізняється базовий план від персонального?</span>
+            <span>Чим відрізняється базовий план від плану на 12 днів?</span>
             <span class="faq__arrow">→</span>
           </button>
           <div class="faq__panel">
-            Базовий — повний функціонал платформи. Персональний — додатково дає адаптивний маршрут по слабких темах та рекомендації, що проходити далі.
+            Функціонал однаковий (тести, іспит, пояснення, статистика, повтор помилок). Різниця тільки у тривалості доступу та вартості: базовий — на місяць, інший тариф — на 12 днів.
           </div>
 
           <button class="faq__item" type="button" data-faq-item>
@@ -497,16 +899,14 @@ if ($userFirstName !== '') {
 <footer class="footer">
   <div class="container footer__inner">
 
-    <!-- Rules -->
     <a class="footer__link" href="/terms.php">
       Правила користування
     </a>
 
-    <!-- Copyright -->
     <div class="footer__copy">
       © ProstoPDR 2019 — <?php echo date('Y'); ?>
       &nbsp;•&nbsp;
-      Created by 
+      Created by
       <a href="https://mazko.com.ua"
          target="_blank"
          rel="noopener"
@@ -515,7 +915,6 @@ if ($userFirstName !== '') {
       </a>
     </div>
 
-    <!-- Payments -->
     <div class="footer__pay">
       <img src="/assets/img/payments.png" alt="Mastercard Visa">
     </div>
@@ -523,6 +922,227 @@ if ($userFirstName !== '') {
   </div>
 </footer>
 
+  <!-- ✅ Chat UI -->
+  <div class="chatbox" data-chatbox aria-hidden="true">
+    <div class="chatbox__head">
+      <div class="chatbox__head-left">
+        <div class="chatbox__title">Онлайн чат підтримки</div>
+        <div class="chatbox__sub">
+          <?php if ($isAdminUi): ?>
+            Режим адміністратора — відповідаєш користувачам
+          <?php else: ?>
+            Напиши нам — адмін відповість у цьому чаті
+          <?php endif; ?>
+        </div>
+      </div>
+      <button class="chatbox__close" type="button" aria-label="Закрити" data-chat-close>✕</button>
+    </div>
+
+    <?php if ($isAdminUi): ?>
+      <div class="chatadmin is-on" data-chatadmin>
+        <div class="chatadmin__label">Діалог:</div>
+        <select class="chatadmin__select" data-chat-thread-select>
+          <option value="">Завантаження…</option>
+        </select>
+      </div>
+    <?php endif; ?>
+
+    <div class="chatbox__body" data-chat-messages></div>
+
+    <div class="chatbox__foot">
+      <textarea class="chatbox__input" data-chat-input placeholder="Напиши повідомлення…"></textarea>
+      <button class="chatbox__send" type="button" data-chat-send>Надіслати</button>
+    </div>
+  </div>
+
   <script src="/assets/js/main.js?v=4"></script>
+
+  <!-- Chat logic (inline to avoid editing main.js) -->
+  <script>
+    (function () {
+      const openBtn = document.querySelector('[data-chat-open]');
+      const chatbox = document.querySelector('[data-chatbox]');
+      const closeBtn = document.querySelector('[data-chat-close]');
+      const listEl = document.querySelector('[data-chat-messages]');
+      const inputEl = document.querySelector('[data-chat-input]');
+      const sendBtn = document.querySelector('[data-chat-send]');
+
+      const isAdmin = <?php echo $isAdminUi ? 'true' : 'false'; ?>;
+      const threadSelect = document.querySelector('[data-chat-thread-select]');
+
+      let currentThread = null;
+      let lastRenderedCount = 0;
+      let pollTimer = null;
+
+      function esc(s) {
+        return String(s || '')
+          .replaceAll('&', '&amp;')
+          .replaceAll('<', '&lt;')
+          .replaceAll('>', '&gt;')
+          .replaceAll('"', '&quot;')
+          .replaceAll("'", '&#039;');
+      }
+
+      function fmtTime(ts) {
+        try {
+          const d = new Date(ts * 1000);
+          return d.toLocaleString('uk-UA', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' });
+        } catch (e) {
+          return '';
+        }
+      }
+
+      function setOpen(state) {
+        if (!chatbox) return;
+        if (state) {
+          chatbox.classList.add('is-open');
+          chatbox.setAttribute('aria-hidden', 'false');
+          if (!pollTimer) {
+            pollTimer = setInterval(fetchMessages, 2500);
+          }
+          fetchInit();
+          setTimeout(() => { inputEl && inputEl.focus(); }, 50);
+        } else {
+          chatbox.classList.remove('is-open');
+          chatbox.setAttribute('aria-hidden', 'true');
+          if (pollTimer) {
+            clearInterval(pollTimer);
+            pollTimer = null;
+          }
+        }
+      }
+
+      async function api(url, options) {
+        const res = await fetch(url, Object.assign({
+          credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' }
+        }, options || {}));
+        return res.json();
+      }
+
+      async function fetchInit() {
+        if (isAdmin) {
+          await loadThreads();
+          if (!currentThread && threadSelect && threadSelect.value) {
+            currentThread = threadSelect.value;
+          }
+        }
+        await fetchMessages();
+      }
+
+      async function loadThreads() {
+        if (!threadSelect) return;
+        const data = await api('?chat_api=1&action=list', { method: 'GET' });
+        if (!data || !data.ok) {
+          threadSelect.innerHTML = '<option value="">Не вдалося завантажити</option>';
+          return;
+        }
+        const threads = Array.isArray(data.threads) ? data.threads : [];
+        if (!threads.length) {
+          threadSelect.innerHTML = '<option value="">Немає діалогів</option>';
+          currentThread = null;
+          lastRenderedCount = 0;
+          listEl.innerHTML = '';
+          return;
+        }
+        const opts = threads.map(t => {
+          const label = t.thread + ' • ' + (t.updated_at ? fmtTime(t.updated_at) : '');
+          const sel = (currentThread && currentThread === t.thread) ? ' selected' : '';
+          return `<option value="${esc(t.thread)}"${sel}>${esc(label)}</option>`;
+        }).join('');
+        threadSelect.innerHTML = opts;
+
+        if (!currentThread) {
+          currentThread = threads[0].thread;
+        }
+      }
+
+      async function fetchMessages() {
+        if (!listEl) return;
+
+        const qs = isAdmin && currentThread ? ('&thread=' + encodeURIComponent(currentThread)) : '';
+        const data = await api('?chat_api=1&action=fetch' + qs, { method: 'GET' });
+
+        if (!data || !data.ok) return;
+
+        const msgs = Array.isArray(data.messages) ? data.messages : [];
+
+        // rerender only if changed
+        if (msgs.length === lastRenderedCount) return;
+        lastRenderedCount = msgs.length;
+
+        const html = msgs.map(m => {
+          const role = (m.role === 'admin') ? 'admin' : 'user';
+          const cls = role === 'admin' ? 'chatmsg chatmsg--admin' : 'chatmsg chatmsg--user';
+          const meta = `${esc(m.name || (role === 'admin' ? 'Адмін' : 'Користувач'))} • ${fmtTime(m.ts || 0)}`;
+          return `
+            <div class="${cls}">
+              <div class="chatmsg__bubble">
+                ${esc(m.text || '')}
+                <div class="chatmsg__meta">${meta}</div>
+              </div>
+            </div>
+          `;
+        }).join('');
+
+        listEl.innerHTML = html;
+
+        // scroll to bottom
+        listEl.scrollTop = listEl.scrollHeight;
+      }
+
+      async function sendMessage() {
+        if (!inputEl) return;
+        const text = inputEl.value.trim();
+        if (!text) return;
+
+        inputEl.value = '';
+        inputEl.style.height = '';
+        const qs = isAdmin && currentThread ? ('&thread=' + encodeURIComponent(currentThread)) : '';
+        const data = await api('?chat_api=1&action=send' + qs, {
+          method: 'POST',
+          body: JSON.stringify({ text })
+        });
+        if (!data || !data.ok) return;
+        await fetchMessages();
+      }
+
+      // Auto-resize textarea
+      function autoResize() {
+        if (!inputEl) return;
+        inputEl.style.height = 'auto';
+        inputEl.style.height = Math.min(inputEl.scrollHeight, 120) + 'px';
+      }
+
+      if (openBtn) openBtn.addEventListener('click', () => setOpen(true));
+      if (closeBtn) closeBtn.addEventListener('click', () => setOpen(false));
+
+      if (sendBtn) sendBtn.addEventListener('click', sendMessage);
+
+      if (inputEl) {
+        inputEl.addEventListener('input', autoResize);
+        inputEl.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            sendMessage();
+          }
+        });
+      }
+
+      if (threadSelect) {
+        threadSelect.addEventListener('change', async () => {
+          currentThread = threadSelect.value || null;
+          lastRenderedCount = 0;
+          listEl.innerHTML = '';
+          await fetchMessages();
+        });
+      }
+
+      // Close on ESC
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') setOpen(false);
+      });
+    })();
+  </script>
 </body>
 </html>

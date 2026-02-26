@@ -223,3 +223,222 @@ function users_repair_and_save(): void {
   $store = users_load();
   users_save($store);
 }
+
+/* ============================================================
+   ✅ СЕСІЇ ПРИСТРОЇВ (для “скидати активні сеанси”)
+   storage/sessions.json:
+   {
+     "users": {
+       "1": {
+         "sessions": {
+           "PHPSESSID...": { "sid":"...", "ip":"", "ua":"", "created_at":"", "last_seen":"", "label":"" }
+         },
+         "revoked": { "sid1": "2026-02-25T..." }
+       }
+     }
+   }
+============================================================ */
+
+function sessions_store_path(): string {
+  return dirname(__DIR__) . '/storage/sessions.json';
+}
+
+function sessions_load(): array {
+  $p = sessions_store_path();
+  if (!is_file($p)) return ['users' => []];
+  $raw = (string)file_get_contents($p);
+  if (trim($raw) === '') return ['users' => []];
+  $data = json_decode($raw, true);
+  if (!is_array($data)) return ['users' => []];
+  if (!isset($data['users']) || !is_array($data['users'])) $data['users'] = [];
+  return $data;
+}
+
+function sessions_save(array $data): void {
+  if (!isset($data['users']) || !is_array($data['users'])) $data['users'] = [];
+  $p = sessions_store_path();
+  $dir = dirname($p);
+  if (!is_dir($dir)) @mkdir($dir, 0775, true);
+
+  $json = json_encode($data, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
+  if ($json === false) throw new RuntimeException('sessions_save: json_encode failed');
+
+  $tmp = $p . '.tmp';
+  $fp = fopen($tmp, 'wb');
+  if (!$fp) throw new RuntimeException('sessions_save: cannot open tmp');
+  if (!flock($fp, LOCK_EX)) { fclose($fp); throw new RuntimeException('sessions_save: cannot lock tmp'); }
+  fwrite($fp, $json);
+  fflush($fp);
+  flock($fp, LOCK_UN);
+  fclose($fp);
+  @rename($tmp, $p);
+}
+
+function client_ip_guess(): string {
+  $keys = ['HTTP_CF_CONNECTING_IP','HTTP_X_FORWARDED_FOR','HTTP_X_REAL_IP','REMOTE_ADDR'];
+  foreach ($keys as $k) {
+    $v = (string)($_SERVER[$k] ?? '');
+    if ($v === '') continue;
+    if (strpos($v, ',') !== false) $v = trim(explode(',', $v)[0]);
+    return $v;
+  }
+  return '';
+}
+
+function session_current_id_safe(): string {
+  $sid = session_id();
+  return is_string($sid) ? $sid : '';
+}
+
+/**
+ * Якщо поточна сесія була “revoked” для цього юзера — розлогінити.
+ */
+function session_enforce_not_revoked(string $uid): void {
+  $uid = (string)$uid;
+  if ($uid === '') return;
+  $sid = session_current_id_safe();
+  if ($sid === '') return;
+
+  $data = sessions_load();
+  $u = $data['users'][$uid] ?? null;
+  if (!is_array($u)) return;
+
+  $revoked = $u['revoked'] ?? null;
+  if (!is_array($revoked)) return;
+
+  if (isset($revoked[$sid])) {
+    // kill session
+    $_SESSION = [];
+    if (session_status() === PHP_SESSION_ACTIVE) {
+      @session_destroy();
+    }
+    header('Location: /login?reason=session_revoked', true, 302);
+    exit;
+  }
+}
+
+/**
+ * Реєструє/оновлює поточну сесію для юзера
+ */
+function session_register_current(string $uid, string $label = ''): void {
+  $uid = (string)$uid;
+  if ($uid === '') return;
+  if (session_status() !== PHP_SESSION_ACTIVE) return;
+
+  $sid = session_current_id_safe();
+  if ($sid === '') return;
+
+  $data = sessions_load();
+  if (!isset($data['users'][$uid]) || !is_array($data['users'][$uid])) {
+    $data['users'][$uid] = ['sessions' => [], 'revoked' => []];
+  }
+  if (!isset($data['users'][$uid]['sessions']) || !is_array($data['users'][$uid]['sessions'])) {
+    $data['users'][$uid]['sessions'] = [];
+  }
+  if (!isset($data['users'][$uid]['revoked']) || !is_array($data['users'][$uid]['revoked'])) {
+    $data['users'][$uid]['revoked'] = [];
+  }
+
+  $now = gmdate('c');
+  $ip = client_ip_guess();
+  $ua = (string)($_SERVER['HTTP_USER_AGENT'] ?? '');
+
+  $existing = $data['users'][$uid]['sessions'][$sid] ?? null;
+  if (is_array($existing)) {
+    $existing['last_seen'] = $now;
+    $existing['ip'] = $ip !== '' ? $ip : (string)($existing['ip'] ?? '');
+    $existing['ua'] = $ua !== '' ? $ua : (string)($existing['ua'] ?? '');
+    if ($label !== '') $existing['label'] = $label;
+    $data['users'][$uid]['sessions'][$sid] = $existing;
+  } else {
+    $data['users'][$uid]['sessions'][$sid] = [
+      'sid' => $sid,
+      'ip' => $ip,
+      'ua' => $ua,
+      'created_at' => $now,
+      'last_seen' => $now,
+      'label' => $label,
+    ];
+  }
+
+  sessions_save($data);
+}
+
+/**
+ * Повертає список активних сесій (масив записів)
+ */
+function sessions_list_for_user(string $uid): array {
+  $uid = (string)$uid;
+  if ($uid === '') return [];
+  $data = sessions_load();
+  $u = $data['users'][$uid] ?? null;
+  if (!is_array($u)) return [];
+  $sessions = $u['sessions'] ?? null;
+  if (!is_array($sessions)) return [];
+
+  $out = [];
+  foreach ($sessions as $sid => $row) {
+    if (!is_array($row)) continue;
+    $row['sid'] = (string)($row['sid'] ?? $sid);
+    $out[] = $row;
+  }
+
+  usort($out, function($a, $b){
+    return strcmp((string)($b['last_seen'] ?? ''), (string)($a['last_seen'] ?? ''));
+  });
+
+  return $out;
+}
+
+/**
+ * Відкликає конкретну сесію (додає в revoked + прибирає з active)
+ */
+function session_revoke_for_user(string $uid, string $sid): void {
+  $uid = (string)$uid;
+  $sid = (string)$sid;
+  if ($uid === '' || $sid === '') return;
+
+  $data = sessions_load();
+  if (!isset($data['users'][$uid]) || !is_array($data['users'][$uid])) {
+    $data['users'][$uid] = ['sessions' => [], 'revoked' => []];
+  }
+  if (!isset($data['users'][$uid]['sessions']) || !is_array($data['users'][$uid]['sessions'])) {
+    $data['users'][$uid]['sessions'] = [];
+  }
+  if (!isset($data['users'][$uid]['revoked']) || !is_array($data['users'][$uid]['revoked'])) {
+    $data['users'][$uid]['revoked'] = [];
+  }
+
+  unset($data['users'][$uid]['sessions'][$sid]);
+  $data['users'][$uid]['revoked'][$sid] = gmdate('c');
+
+  sessions_save($data);
+}
+
+/**
+ * Відкликає всі сесії користувача (опційно крім поточної)
+ */
+function sessions_revoke_all_for_user(string $uid, ?string $exceptSid = null): void {
+  $uid = (string)$uid;
+  if ($uid === '') return;
+
+  $data = sessions_load();
+  if (!isset($data['users'][$uid]) || !is_array($data['users'][$uid])) {
+    $data['users'][$uid] = ['sessions' => [], 'revoked' => []];
+  }
+  if (!isset($data['users'][$uid]['sessions']) || !is_array($data['users'][$uid]['sessions'])) {
+    $data['users'][$uid]['sessions'] = [];
+  }
+  if (!isset($data['users'][$uid]['revoked']) || !is_array($data['users'][$uid]['revoked'])) {
+    $data['users'][$uid]['revoked'] = [];
+  }
+
+  $sessions = $data['users'][$uid]['sessions'];
+  foreach ($sessions as $sid => $row) {
+    if ($exceptSid !== null && $sid === $exceptSid) continue;
+    unset($data['users'][$uid]['sessions'][$sid]);
+    $data['users'][$uid]['revoked'][(string)$sid] = gmdate('c');
+  }
+
+  sessions_save($data);
+}

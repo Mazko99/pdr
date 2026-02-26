@@ -151,25 +151,46 @@ $allPool = [];           // all qids (АЛЕ тільки з дозволени�
 
 $allowedQidSet = []; // qid => true (лише з тестів до cutoff)
 
+// ===== ДОДАНО: айді тестів по темах для ЛОГІКИ ВІДКРИТТЯ ІСПИТІВ =====
+$topicTestIds = []; // topic => [testId1, testId2, ...]
+$allTestIds   = []; // всі test_id з усіх тем
+
 foreach ($topics as $topicName => $items) {
   $set = [];
+  $tids = [];
+
   foreach ($items as $t) {
     if (!is_array($t)) continue;
     if ((string)($t['type'] ?? 'test') !== 'test') continue;
+
+    // збираємо питання
     $qids = $t['question_ids'] ?? [];
-    if (!is_array($qids)) continue;
-    foreach ($qids as $qid) {
-      $qid = (int)$qid;
-      if ($qid > 0) {
-        $set[$qid] = true;
-        $allowedQidSet[$qid] = true;
+    if (is_array($qids)) {
+      foreach ($qids as $qid) {
+        $qid = (int)$qid;
+        if ($qid > 0) {
+          $set[$qid] = true;
+          $allowedQidSet[$qid] = true;
+        }
       }
     }
+
+    // збираємо ID тестів (для unlock)
+    $tid = (int)($t['id'] ?? 0);
+    if ($tid > 0) {
+      $tids[] = $tid;
+      $allTestIds[$tid] = true;
+    }
   }
+
   $pool = array_keys($set);
   sort($pool);
   $topicPools[$topicName] = $pool;
   $topicPoolsCount[$topicName] = count($pool);
+
+  $tids = array_values(array_unique($tids));
+  sort($tids);
+  $topicTestIds[$topicName] = $tids;
 }
 
 // allPool тільки з дозволених qid і тільки якщо вони є в questions_export.json
@@ -181,7 +202,18 @@ sort($allPool);
 
 function h(string $s): string { return htmlspecialchars($s, ENT_QUOTES, 'UTF-8'); }
 
-$title = 'Тести';
+// ===== ДОДАНО: функція перевірки "складені всі тести" =====
+function all_tests_passed(array $testIds, array $passedTests): bool {
+  if (empty($testIds)) return false; // якщо в темі нема тестів — не відкривати
+  foreach ($testIds as $tid) {
+    $tid = (int)$tid;
+    if ($tid <= 0) continue;
+    if (empty($passedTests[(string)$tid])) return false;
+  }
+  return true;
+}
+
+$title = 'Підготовчі запитання до іспиту';
 if ($mode === 'exam') $title = 'Іспит';
 if ($mode === 'trainer') $title = 'Тренажер';
 
@@ -227,13 +259,33 @@ $csrf = csrf_token();
 
       <!-- =========================
            ІСПИТИ (ПО ТЕМАХ + МІКС)
+           ЛОГІКА: іспит по темі відкривається тільки якщо складені ВСІ тести цієї теми
            ========================= -->
 
+      <?php
+        $mixedUnlocked = all_tests_passed(array_keys($allTestIds), $passedTests);
+      ?>
+
       <div class="account-card" style="margin-top:12px;">
-        <h3 class="h3">Змішаний іспит (всі теми)</h3>
+        <h3 class="h3" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+          <span>Змішаний іспит (всі теми)</span>
+          <?php if (!$mixedUnlocked): ?>
+            <span style="display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border-radius:999px;background:#f3f4f6;color:#111827;font-weight:800;font-size:12px;line-height:1;">
+              <span aria-hidden="true" style="font-size:14px;">🔒</span>
+              <span>Заблоковано</span>
+            </span>
+          <?php endif; ?>
+        </h3>
+
         <p class="lead" style="margin-top:6px;">
           40 питань • 40 хв • 3 помилки • випадково з усіх тем
         </p>
+
+        <?php if (!$mixedUnlocked): ?>
+          <p class="lead" style="margin-top:8px;">
+            Щоб відкрити змішаний іспит — склади <b>усі тести по всіх темах</b>.
+          </p>
+        <?php endif; ?>
 
         <div style="margin-top:12px; display:flex; gap:12px; flex-wrap:wrap;">
           <form method="post" action="/account/quiz.php">
@@ -241,7 +293,9 @@ $csrf = csrf_token();
             <input type="hidden" name="action" value="start">
             <input type="hidden" name="mode" value="exam_mix">
             <input type="hidden" name="seed" value="<?php echo (int)random_int(1, 1000000000); ?>">
-            <button class="btn btn--primary" type="submit">Почати змішаний іспит →</button>
+            <button class="btn btn--primary" type="submit" <?php echo $mixedUnlocked ? '' : 'disabled style="opacity:.55;cursor:not-allowed;"'; ?>>
+              <?php echo $mixedUnlocked ? 'Почати змішаний іспит →' : 'Почати (заблоковано)'; ?>
+            </button>
           </form>
         </div>
       </div>
@@ -252,12 +306,30 @@ $csrf = csrf_token();
           if ($total <= 0) continue;
 
           $parts = (int)ceil($total / EXAM_QUESTIONS);
+
+          $topicUnlocked = all_tests_passed($topicTestIds[$topicName] ?? [], $passedTests);
         ?>
 
         <div class="topic-block" style="margin-top:14px;">
-          <div class="topic-block__head">
-            <h3 class="h3"><?php echo h($topicName); ?></h3>
+          <div class="topic-block__head" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+            <h3 class="h3" style="margin:0;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+              <span><?php echo h($topicName); ?></span>
+              <?php if (!$topicUnlocked): ?>
+                <span style="display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border-radius:999px;background:#f3f4f6;color:#111827;font-weight:800;font-size:12px;line-height:1;">
+                  <span aria-hidden="true" style="font-size:14px;">🔒</span>
+                  <span>Заблоковано</span>
+                </span>
+              <?php endif; ?>
+            </h3>
           </div>
+
+          <?php if (!$topicUnlocked): ?>
+            <div class="account-card" style="margin-top:10px;">
+              <p class="lead" style="margin:0;">
+                Щоб відкрити іспити по темі <b><?php echo h($topicName); ?></b> — склади <b>усі тести цієї теми</b>.
+              </p>
+            </div>
+          <?php endif; ?>
 
           <div class="topic-tests">
             <?php for ($p = 1; $p <= $parts; $p++): ?>
@@ -281,7 +353,9 @@ $csrf = csrf_token();
                     <input type="hidden" name="topic" value="<?php echo h($topicName); ?>">
                     <input type="hidden" name="part" value="<?php echo (int)$p; ?>">
                     <input type="hidden" name="seed" value="<?php echo (int)$seed; ?>">
-                    <button class="btn btn--primary" type="submit">Почати</button>
+                    <button class="btn btn--primary" type="submit" <?php echo $topicUnlocked ? '' : 'disabled style="opacity:.55;cursor:not-allowed;"'; ?>>
+                      <?php echo $topicUnlocked ? 'Почати' : 'Почати (🔒)'; ?>
+                    </button>
                   </form>
                 </div>
               </div>
