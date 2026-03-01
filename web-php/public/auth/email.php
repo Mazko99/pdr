@@ -43,9 +43,18 @@ if ($mode === 'register') {
 
   auth_login((string)$uid);
 
-  // ✅ ДОДАНО: реєстрація сеансу (щоб відображалось в "Активні сеанси")
+  // ✅ Реєстрація сесії (для адмінки/кабінету "Активні сеанси")
   if (function_exists('session_register_current')) {
     session_register_current((string)$uid, 'Email register');
+  }
+
+  // ✅ Device policy: 2 remembered + 1 active
+  if (function_exists('ds_on_login')) {
+    $res = ds_on_login((string)$uid, session_id(), 2);
+    if (!($res['ok'] ?? false)) {
+      auth_logout();
+      redirect('/login?reason=max_devices');
+    }
   }
 
   // опційно: одразу підрахувати доступ
@@ -54,7 +63,8 @@ if ($mode === 'register') {
   redirect('/account/index.php');
 }
 
-// login
+// ------------------ LOGIN ------------------
+
 if ($pass === '') {
   redirect('/login?err=' . rawurlencode('Введи пароль'));
 }
@@ -68,11 +78,26 @@ if (!user_verify_password($user, $pass)) {
   redirect('/login?err=' . rawurlencode('Невірний пароль'));
 }
 
-auth_login((string)$user['id']);
+$userId = (string)($user['id'] ?? '');
+if ($userId === '') {
+  redirect('/login?err=' . rawurlencode('Помилка акаунта. Спробуй ще раз.'));
+}
 
-// ✅ ДОДАНО: реєстрація сеансу
+auth_login($userId);
+
+// ✅ Реєстрація сесії (один раз!)
 if (function_exists('session_register_current')) {
-  session_register_current((string)$user['id'], 'Email login');
+  session_register_current($userId, 'Email login');
+}
+
+// ✅ Device policy: 2 remembered + 1 active
+// (якщо ліміт 2 пристроїв перевищено — не пускаємо)
+if (function_exists('ds_on_login')) {
+  $res = ds_on_login($userId, session_id(), 2);
+  if (!($res['ok'] ?? false)) {
+    auth_logout();
+    redirect('/login?reason=max_devices');
+  }
 }
 
 auth_refresh_access();

@@ -4,6 +4,17 @@ declare(strict_types=1);
 $bootstrap = __DIR__ . '/../../src/bootstrap.php';
 $usersStore = __DIR__ . '/../../src/users_store.php';
 
+// 1) Треба бути залогіненим
+if (!auth_user_id()) {
+  redirect('/login');
+}
+
+// 2) Підтягнути актуальний доступ/план (опційно, але бажано)
+auth_refresh_access();
+
+// 3) Перевірка політики "1 активний пристрій"
+auth_enforce_device_policy();
+
 if (is_file($bootstrap)) require_once $bootstrap;
 if (is_file($usersStore)) require_once $usersStore;
 

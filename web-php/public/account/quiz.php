@@ -1,8 +1,19 @@
 <?php
 declare(strict_types=1);
 
-require __DIR__ . '/../../src/bootstrap.php';
+require_once __DIR__ . '/../../src/bootstrap.php';
+require_once __DIR__ . '/../../src/users_store.php';
 
+// 1) Треба бути залогіненим
+if (!auth_user_id()) {
+  redirect('/login');
+}
+
+// 2) Підтягнути актуальний доступ/план (опційно, але бажано)
+auth_refresh_access();
+
+// 3) Перевірка політики "1 активний пристрій"
+auth_enforce_device_policy();
 /**
  * ProstoPDR / public/account/quiz.php
  * JSON: public/data/questions_export.json, public/data/tests_export.json

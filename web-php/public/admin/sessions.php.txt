@@ -4,6 +4,12 @@ declare(strict_types=1);
 require_once __DIR__ . '/_guard.php';
 require_once __DIR__ . '/../../src/users_store.php';
 
+// ✅ ДОДАНО: device policy reset для адміна
+$dsFile = __DIR__ . '/../../src/device_sessions.php';
+if (is_file($dsFile)) {
+  require_once $dsFile;
+}
+
 if (session_status() !== PHP_SESSION_ACTIVE) @session_start();
 
 function h($v): string { return htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8'); }
@@ -43,7 +49,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
   if ($action === 'revoke_all') {
     $u = (string)($_POST['uid'] ?? '');
-    if ($u !== '') sessions_revoke_all_for_user($u, null);
+    if ($u !== '') {
+      sessions_revoke_all_for_user($u, null);
+
+      // ✅ ДОДАНО: скинути активну сесію у device_sessions.json
+      if (function_exists('ds_reset_user')) {
+        ds_reset_user($u, false); // false = не чистимо remembered devices
+      }
+    }
     admin_redirect('/admin/sessions.php?uid=' . urlencode($u) . '&ok=1');
   }
 }
