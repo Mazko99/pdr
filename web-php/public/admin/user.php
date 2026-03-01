@@ -3,268 +3,321 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/_guard.php';
 require_once __DIR__ . '/../../src/users_store.php';
+require_once __DIR__ . '/../../src/chat_store.php';
 
-if (session_status() !== PHP_SESSION_ACTIVE) {
-  @session_start();
-}
+if (session_status() !== PHP_SESSION_ACTIVE) @session_start();
 
 function h($v): string { return htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8'); }
 
-function csrf_token_admin(): string {
-  if (empty($_SESSION['admin_csrf'])) $_SESSION['admin_csrf'] = bin2hex(random_bytes(16));
-  return (string)$_SESSION['admin_csrf'];
-}
-
-function csrf_verify_admin(?string $token): void {
-  $ok = isset($_SESSION['admin_csrf']) && is_string($_SESSION['admin_csrf']) && hash_equals($_SESSION['admin_csrf'], (string)$token);
-  if (!$ok) {
-    http_response_code(419);
-    echo "CSRF помилка.";
-    exit;
-  }
-}
-
-function admin_redirect(string $url): void {
-  header('Location: ' . $url, true, 302);
+$uid = (string)($_GET['id'] ?? '');
+if ($uid === '') {
+  http_response_code(400);
+  echo 'Missing id';
   exit;
 }
+
+$user = user_find_by_id($uid);
+if (!is_array($user)) {
+  http_response_code(404);
+  echo 'User not found';
+  exit;
+}
+
+$notice = '';
+$error = '';
 
 function admin_users_json_path(): string {
   return __DIR__ . '/../../storage/users.json';
 }
 
-/**
- * ЧИТАННЯ: підтримує { "users": [...] } і “биті” формати.
- * Повертає MAP: [id => userArray]
- */
-function admin_load_users_fallback(): array {
-  $path = admin_users_json_path();
-  if (!is_file($path)) return [];
-
-  $raw = file_get_contents($path);
-  if ($raw === false) return [];
-
+function admin_users_load_raw(): array {
+  $p = admin_users_json_path();
+  if (!is_file($p)) return ['users' => []];
+  $raw = (string)file_get_contents($p);
+  if (strncmp($raw, "\xEF\xBB\xBF", 3) === 0) $raw = substr($raw, 3);
   $data = json_decode($raw, true);
-  if (!is_array($data)) return [];
-
-  // ✅ якщо є ключ users — це головний формат
-  if (isset($data['users']) && is_array($data['users'])) {
-    $out = [];
-    foreach ($data['users'] as $u) {
-      if (!is_array($u)) continue;
-      $id = (string)($u['id'] ?? '');
-      if ($id === '') continue;
-      $out[$id] = $u;
-    }
-    return $out;
+  if (!is_array($data)) return ['users' => []];
+  if (!isset($data['users']) || !is_array($data['users'])) {
+    // якщо це просто список
+    $isList = array_keys($data) === range(0, count($data) - 1);
+    if ($isList) return ['users' => $data];
+    return ['users' => []];
   }
-
-  // fallback: list
-  $isList = array_keys($data) === range(0, count($data) - 1);
-  if ($isList) {
-    $out = [];
-    foreach ($data as $u) {
-      if (!is_array($u)) continue;
-      $id = (string)($u['id'] ?? '');
-      if ($id === '') continue;
-      $out[$id] = $u;
-    }
-    return $out;
-  }
-
-  // fallback: map
-  $out = [];
-  foreach ($data as $k => $u) {
-    if (!is_array($u)) continue;
-    $id = (string)($u['id'] ?? $k);
-    if ($id === '') continue;
-    $out[$id] = $u;
-  }
-  return $out;
+  return $data;
 }
 
-/**
- * ЗАПИС: зберігаємо строго { "users": [ ... ] }
- */
-function admin_save_users_strict(array $usersMap): void {
-  $list = [];
-  foreach ($usersMap as $id => $u) {
-    if (!is_array($u)) continue;
-    $u['id'] = (string)($u['id'] ?? $id);
-    if ($u['id'] === '') continue;
-    $list[] = $u;
-  }
-
-  $path = admin_users_json_path();
-  $dir = dirname($path);
+function admin_users_save_raw(array $data): void {
+  if (!isset($data['users']) || !is_array($data['users'])) $data['users'] = [];
+  $p = admin_users_json_path();
+  $dir = dirname($p);
   if (!is_dir($dir)) @mkdir($dir, 0775, true);
 
-  $json = json_encode(['users' => array_values($list)], JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
-  if ($json === false) {
-    throw new RuntimeException('admin_save_users_strict: json_encode failed');
+  $json = json_encode($data, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
+  if (!is_string($json)) return;
+
+  $tmp = $p . '.tmp';
+  file_put_contents($tmp, $json);
+  @rename($tmp, $p);
+}
+
+function admin_users_update_user(array $newUser): void {
+  $data = admin_users_load_raw();
+  $id = (string)($newUser['id'] ?? '');
+  if ($id === '') return;
+
+  $out = [];
+  $found = false;
+  foreach (($data['users'] ?? []) as $u) {
+    if (!is_array($u)) continue;
+    if ((string)($u['id'] ?? '') === $id) {
+      $out[] = $newUser;
+      $found = true;
+    } else {
+      $out[] = $u;
+    }
   }
+  if (!$found) $out[] = $newUser;
 
-  $tmp = $path . '.tmp';
-  $fp = fopen($tmp, 'wb');
-  if (!$fp) throw new RuntimeException('admin_save_users_strict: cannot open tmp');
-  if (!flock($fp, LOCK_EX)) { fclose($fp); throw new RuntimeException('admin_save_users_strict: cannot lock tmp'); }
-
-  fwrite($fp, $json);
-  fflush($fp);
-  flock($fp, LOCK_UN);
-  fclose($fp);
-
-  @rename($tmp, $path);
+  $data['users'] = $out;
+  admin_users_save_raw($data);
 }
 
-$users = admin_load_users_fallback();
-
-$id = (string)($_GET['id'] ?? '');
-if ($id === '' || !isset($users[$id]) || !is_array($users[$id])) {
-  http_response_code(404);
-  echo "Користувача не знайдено.";
-  exit;
+function admin_users_delete_user(string $id): void {
+  $data = admin_users_load_raw();
+  $out = [];
+  foreach (($data['users'] ?? []) as $u) {
+    if (!is_array($u)) continue;
+    if ((string)($u['id'] ?? '') === $id) continue;
+    $out[] = $u;
+  }
+  $data['users'] = $out;
+  admin_users_save_raw($data);
 }
-
-$realKey = $id;
-
-/* ==============
-   POST ACTIONS
-============== */
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-  csrf_verify_admin((string)($_POST['csrf'] ?? ''));
+  admin_csrf_verify($_POST['csrf'] ?? null);
 
   $action = (string)($_POST['action'] ?? '');
 
   if ($action === 'grant_plan') {
-    $plan = (string)($_POST['plan'] ?? 'free');
-    $days = (int)($_POST['days'] ?? 30);
-    if ($days < 0) $days = 0;
+    $plan = strtolower(trim((string)($_POST['plan'] ?? 'free')));
+    if (!in_array($plan, ['free','basic','personal','dev'], true)) $plan = 'free';
 
-    // allowed plans
-    $allowed = ['free','dev','basic','personal'];
-    if (!in_array($plan, $allowed, true)) $plan = 'free';
+    $days = (int)($_POST['days'] ?? 0);
+    $expiresAt = trim((string)($_POST['expires_at'] ?? ''));
 
-    $users[$realKey]['plan'] = $plan;
-    $users[$realKey]['plan_set_at'] = gmdate('c');
+    $user['plan'] = $plan;
+    $user['paid_at'] = gmdate('c');
 
     if ($plan === 'free') {
-      $users[$realKey]['paid_at'] = null;
-      $users[$realKey]['expires_at'] = null;
+      $user['expires_at'] = null;
     } else {
-      $users[$realKey]['paid_at'] = gmdate('c');
-      if ($days > 0) {
-        $users[$realKey]['expires_at'] = gmdate('c', time() + $days * 86400);
+      if ($expiresAt !== '') {
+        // дозволяємо YYYY-MM-DD або ISO
+        $ts = strtotime($expiresAt);
+        if ($ts === false) {
+          $error = 'Невірна дата expires_at.';
+        } else {
+          $user['expires_at'] = gmdate('c', $ts);
+        }
       } else {
-        $users[$realKey]['expires_at'] = null;
+        if ($days <= 0) $days = 30;
+        $user['expires_at'] = gmdate('c', time() + $days * 86400);
       }
     }
 
-    admin_save_users_strict($users);
-    admin_redirect('/admin/user.php?id=' . urlencode($id) . '&ok=1');
+    if ($error === '') {
+      admin_users_update_user($user);
+      $notice = 'Підписку оновлено.';
+    }
   }
 
-  // ✅ НОВЕ: скинути активні сесії користувача
   if ($action === 'reset_sessions') {
-    sessions_revoke_all_for_user($id, null); // все
-    admin_redirect('/admin/user.php?id=' . urlencode($id) . '&sessions_reset=1');
+    if (function_exists('sessions_revoke_all_for_user')) {
+      sessions_revoke_all_for_user($uid, null);
+      $notice = 'Сесії відкликано.';
+    } else {
+      $error = 'sessions_revoke_all_for_user() не знайдено (перевір users_store.php).';
+    }
   }
 
-  // інші дії (якщо були в тебе) — лишаються як є
+  if ($action === 'revoke_one_session') {
+    $sid = (string)($_POST['sid'] ?? '');
+    if ($sid !== '' && function_exists('session_revoke_for_user')) {
+      session_revoke_for_user($uid, $sid);
+      $notice = 'Сесію відкликано.';
+    } else {
+      $error = 'Нема sid або session_revoke_for_user() не знайдено.';
+    }
+  }
+
+  if ($action === 'delete_user') {
+    admin_users_delete_user($uid);
+    header('Location: /admin/users.php', true, 302);
+    exit;
+  }
+
+  // refresh user
+  $user = user_find_by_id($uid);
 }
 
-/* ==============
-   VIEW
-============== */
-
-$u = $users[$realKey];
+$sessions = [];
+if (function_exists('sessions_list_for_user')) {
+  $sessions = sessions_list_for_user($uid);
+  if (!is_array($sessions)) $sessions = [];
+}
 
 ?><!doctype html>
 <html lang="uk">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Адмінка — User #<?= h($id) ?></title>
+  <title>Адмінка — Профіль</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800;900&family=Unbounded:wght@500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/assets/css/style.css?v=4" />
   <style>
-    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial; margin:0; background:#f6f7f7; color:#0b1b14;}
-    a{color:inherit; text-decoration:none;}
-    .wrap{max-width:1100px; margin:0 auto; padding:16px;}
-    .top{display:flex; gap:10px; align-items:center; justify-content:space-between; padding:16px; background:#fff; border-bottom:1px solid rgba(11,27,20,.08);}
-    .btn{display:inline-flex; align-items:center; justify-content:center; padding:10px 14px; border-radius:12px; background:#0a7a3d; color:#fff; font-weight:800; border:0; cursor:pointer;}
-    .btn--ghost{background:#fff; color:#0b1b14; border:1px solid rgba(11,27,20,.12);}
-    .card{background:#fff; border-radius:14px; border:1px solid rgba(11,27,20,.08); padding:14px; margin-top:14px;}
-    .row{display:grid; grid-template-columns: 220px 1fr; gap:10px; padding:6px 0; border-bottom:1px solid rgba(11,27,20,.06);}
-    .row:last-child{border-bottom:0}
-    .muted{opacity:.65; font-weight:700;}
-    .pill{display:inline-flex; padding:6px 10px; border-radius:999px; border:1px solid rgba(11,27,20,.12); background:#fff; font-weight:900; font-size:12px;}
-    .ok{background:rgba(10,122,61,.10); border-color:rgba(10,122,61,.25);}
+    .row{display:flex;gap:12px;flex-wrap:wrap;align-items:flex-start}
+    .col{flex:1 1 360px}
+    .tbl{width:100%;border-collapse:collapse}
+    .tbl th,.tbl td{padding:10px 10px;border-bottom:1px solid rgba(11,27,20,.08);text-align:left;vertical-align:top}
+    .tbl th{font-weight:900}
+    .muted{opacity:.7;font-weight:800}
+    .danger{border-color:rgba(180,35,24,.35)!important}
   </style>
 </head>
 <body>
 
-<div class="top">
-  <div style="display:flex; gap:10px; align-items:center;">
-    <a class="btn btn--ghost" href="/admin/users.php">← Користувачі</a>
-    <a class="btn btn--ghost" href="/admin/chat.php?uid=<?= urlencode($id) ?>">Чат з користувачем</a>
-    <div style="font-weight:900;">User #<?= h($id) ?></div>
-  </div>
-  <div class="muted"><?= h((string)($u['email'] ?? '')) ?></div>
-</div>
+<main class="section section--soft" style="padding-top:24px;">
+  <div class="container" style="max-width:1100px;">
 
-<div class="wrap">
+    <div class="account-card" style="margin-bottom:12px;">
+      <div style="display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap">
+        <div>
+          <div class="h2" style="margin:0;">Профіль користувача</div>
+          <div class="lead" style="margin:6px 0 0;">ID: <b><?= h($uid) ?></b></div>
+        </div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <a class="btn btn--ghost" href="/admin/users.php">← Назад</a>
+          <a class="btn btn--ghost" href="/admin/chat.php?uid=<?= urlencode($uid) ?>">Чат</a>
+        </div>
+      </div>
 
-  <?php if (!empty($_GET['ok'])): ?>
-    <div class="card"><span class="pill ok">✅ Збережено</span></div>
-  <?php endif; ?>
-
-  <?php if (!empty($_GET['sessions_reset'])): ?>
-    <div class="card"><span class="pill ok">✅ Сесії користувача скинуті</span></div>
-  <?php endif; ?>
-
-  <div class="card">
-    <div class="row"><div class="muted">Ім’я</div><div><b><?= h((string)($u['name'] ?? '')) ?></b></div></div>
-    <div class="row"><div class="muted">Email</div><div><?= h((string)($u['email'] ?? '')) ?></div></div>
-    <div class="row"><div class="muted">План</div><div><span class="pill"><?= h((string)($u['plan'] ?? 'free')) ?></span></div></div>
-    <div class="row"><div class="muted">Paid at</div><div><?= h((string)($u['paid_at'] ?? '—')) ?></div></div>
-    <div class="row"><div class="muted">Expires</div><div><?= h((string)($u['expires_at'] ?? '—')) ?></div></div>
-    <div class="row"><div class="muted">Created</div><div><?= h((string)($u['created_at'] ?? '—')) ?></div></div>
-  </div>
-
-  <div class="card">
-    <div style="font-weight:900; margin-bottom:10px;">Доступ/План</div>
-
-    <form method="post" style="display:flex; gap:10px; flex-wrap:wrap; align-items:end;">
-      <input type="hidden" name="csrf" value="<?= h(csrf_token_admin()) ?>">
-      <input type="hidden" name="action" value="grant_plan">
-
-      <label style="display:flex; flex-direction:column; gap:6px; font-weight:900;">
-        План
-        <select name="plan" style="padding:10px 12px; border-radius:12px; border:1px solid rgba(11,27,20,.18); font-weight:800;">
-          <?php foreach (['free','basic','personal','dev'] as $p): ?>
-            <option value="<?= h($p) ?>" <?= ((string)($u['plan'] ?? 'free')===$p)?'selected':''; ?>><?= h($p) ?></option>
-          <?php endforeach; ?>
-        </select>
-      </label>
-
-      <label style="display:flex; flex-direction:column; gap:6px; font-weight:900;">
-        Днів
-        <input type="number" name="days" value="30" min="0" style="padding:10px 12px; border-radius:12px; border:1px solid rgba(11,27,20,.18); font-weight:800; width:120px;">
-      </label>
-
-      <button class="btn" type="submit">Застосувати</button>
-    </form>
-
-    <div style="margin-top:12px;">
-      <form method="post">
-        <input type="hidden" name="csrf" value="<?= h(csrf_token_admin()) ?>">
-        <input type="hidden" name="action" value="reset_sessions">
-        <button class="btn btn--ghost" type="submit">Скинути активні сесії</button>
-      </form>
-      <div class="muted" style="margin-top:8px;">Після скидання користувача викине з усіх пристроїв (на наступному запиті).</div>
+      <?php if ($notice !== ''): ?>
+        <div class="notice notice--ok" style="margin-top:12px;"><?= h($notice) ?></div>
+      <?php endif; ?>
+      <?php if ($error !== ''): ?>
+        <div class="notice notice--bad" style="margin-top:12px;"><?= h($error) ?></div>
+      <?php endif; ?>
     </div>
-  </div>
 
-</div>
+    <div class="row">
+      <div class="account-card col">
+        <div class="h3" style="margin-top:0;">Дані</div>
+        <div class="muted">Імʼя</div>
+        <div style="font-weight:900;margin-bottom:10px;"><?= h((string)($user['name'] ?? '')) ?></div>
+
+        <div class="muted">Email</div>
+        <div style="font-weight:900;margin-bottom:10px;"><?= h((string)($user['email'] ?? '')) ?></div>
+
+        <div class="muted">Plan</div>
+        <div style="font-weight:900;margin-bottom:10px;"><?= h((string)($user['plan'] ?? 'free')) ?></div>
+
+        <div class="muted">Expires</div>
+        <div style="font-weight:900;"><?= h((string)($user['expires_at'] ?? '—')) ?></div>
+      </div>
+
+      <div class="account-card col">
+        <div class="h3" style="margin-top:0;">Керування підпискою</div>
+
+        <form method="post" action="/admin/user.php?id=<?= urlencode($uid) ?>" style="display:grid;gap:10px;margin:0">
+          <input type="hidden" name="csrf" value="<?= h((string)($_SESSION['admin_csrf'] ?? '')) ?>">
+          <input type="hidden" name="action" value="grant_plan">
+
+          <label style="font-weight:900;">Plan</label>
+          <select class="input" name="plan" style="padding:12px;border-radius:12px;border:1px solid rgba(0,0,0,.12);font-weight:800;">
+            <?php $pl = (string)($user['plan'] ?? 'free'); ?>
+            <option value="free" <?= $pl==='free'?'selected':''; ?>>free</option>
+            <option value="basic" <?= $pl==='basic'?'selected':''; ?>>basic</option>
+            <option value="personal" <?= $pl==='personal'?'selected':''; ?>>personal</option>
+            <option value="dev" <?= $pl==='dev'?'selected':''; ?>>dev</option>
+          </select>
+
+          <div class="muted">Варіант 1: дні (якщо expires_at пустий)</div>
+          <input class="input" type="number" name="days" placeholder="Напр. 30" min="0"
+                 style="padding:12px;border-radius:12px;border:1px solid rgba(0,0,0,.12);font-weight:800;">
+
+          <div class="muted">Варіант 2: конкретна дата (YYYY-MM-DD або ISO)</div>
+          <input class="input" type="text" name="expires_at" placeholder="2026-03-31"
+                 style="padding:12px;border-radius:12px;border:1px solid rgba(0,0,0,.12);font-weight:800;">
+
+          <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:6px;">
+            <button class="btn btn--primary" type="submit">Зберегти</button>
+            <a class="btn btn--ghost" href="/admin/user.php?id=<?= urlencode($uid) ?>">Оновити</a>
+          </div>
+        </form>
+
+        <div style="height:14px"></div>
+
+        <form method="post" action="/admin/user.php?id=<?= urlencode($uid) ?>" style="margin:0;">
+          <input type="hidden" name="csrf" value="<?= h((string)($_SESSION['admin_csrf'] ?? '')) ?>">
+          <input type="hidden" name="action" value="reset_sessions">
+          <button class="btn btn--ghost" type="submit">Скинути активні сесії</button>
+        </form>
+
+        <div style="height:14px"></div>
+
+        <form method="post" action="/admin/user.php?id=<?= urlencode($uid) ?>" style="margin:0;"
+              onsubmit="return confirm('Точно видалити користувача?');">
+          <input type="hidden" name="csrf" value="<?= h((string)($_SESSION['admin_csrf'] ?? '')) ?>">
+          <input type="hidden" name="action" value="delete_user">
+          <button class="btn btn--ghost danger" type="submit">Видалити користувача</button>
+        </form>
+      </div>
+    </div>
+
+    <div class="account-card" style="margin-top:12px;">
+      <div class="h3" style="margin-top:0;">Пристрої / Активні сесії</div>
+
+      <?php if (empty($sessions)): ?>
+        <div class="muted">Нема активних сесій (або sessions_list_for_user() не ведеться).</div>
+      <?php else: ?>
+        <table class="tbl">
+          <thead>
+            <tr>
+              <th>SID</th>
+              <th>IP</th>
+              <th>User-Agent</th>
+              <th>Created</th>
+              <th>Last seen</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            <?php foreach ($sessions as $s): ?>
+              <tr>
+                <td style="font-weight:900;"><?= h((string)($s['sid'] ?? '')) ?></td>
+                <td class="muted"><?= h((string)($s['ip'] ?? '')) ?></td>
+                <td class="muted" style="max-width:520px;white-space:normal;"><?= h((string)($s['ua'] ?? '')) ?></td>
+                <td class="muted"><?= h((string)($s['created_at'] ?? '')) ?></td>
+                <td class="muted"><?= h((string)($s['last_seen'] ?? '')) ?></td>
+                <td>
+                  <form method="post" action="/admin/user.php?id=<?= urlencode($uid) ?>" style="margin:0;">
+                    <input type="hidden" name="csrf" value="<?= h((string)($_SESSION['admin_csrf'] ?? '')) ?>">
+                    <input type="hidden" name="action" value="revoke_one_session">
+                    <input type="hidden" name="sid" value="<?= h((string)($s['sid'] ?? '')) ?>">
+                    <button class="btn btn--ghost" type="submit">Відкликати</button>
+                  </form>
+                </td>
+              </tr>
+            <?php endforeach; ?>
+          </tbody>
+        </table>
+      <?php endif; ?>
+    </div>
+
+  </div>
+</main>
 </body>
 </html>

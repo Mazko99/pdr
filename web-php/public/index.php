@@ -10,8 +10,9 @@ if (session_status() !== PHP_SESSION_ACTIVE) {
  * INLINE CHAT API (same file)
  * ===========================
  * Endpoints:
- *   GET  ?chat_api=1&action=fetch[&thread=...]
- *   POST ?chat_api=1&action=send[&thread=...]
+ *   api('/chat_api.php?action=list', { method:'GET' })
+     api('/chat_api.php?action=fetch' + qs, { method:'GET' })
+     api('/chat_api.php?action=send' + qs, { method:'POST', body: JSON.stringify({ text }) })
  *
  * Storage:
  *   /data/chat_threads/<threadId>.json
@@ -473,7 +474,6 @@ $isAdminUi = !empty($_SESSION['is_admin']) && $_SESSION['is_admin'] === true;
             </div>
 
             <a class="usermenu__item" href="/account"><span class="usermenu__icon">👤</span> Кабінет</a>
-            <a class="usermenu__item" href="#"><span class="usermenu__icon">🧑‍</span> Викладач</a>
             <a class="usermenu__item" href="/account?tab=subscriptions"><span class="usermenu__icon">💳</span> Мої підписки</a>
             <a class="usermenu__item" href="#"><span class="usermenu__icon">🔔</span> Сповіщення <span class="usermenu__badge">1</span></a>
             <a class="usermenu__item usermenu__item--danger" href="/logout"><span class="usermenu__icon">↩</span> Вийти</a>
@@ -519,8 +519,8 @@ $isAdminUi = !empty($_SESSION['is_admin']) && $_SESSION['is_admin'] === true;
       <div class="container hero__grid">
         <div class="hero__content">
           <div class="hero__kicker">
-            <span class="hero__arrow">→</span>
-            онлайн-підготовка до теоретичного іспиту та тренажер тестів ПДР
+            <span class="hero__arrow"></span>
+            
           </div>
 
           <h1 class="hero__title">
@@ -671,7 +671,7 @@ $isAdminUi = !empty($_SESSION['is_admin']) && $_SESSION['is_admin'] === true;
               </p>
 
               <div class="plan__price">
-                <span class="plan__amount">349,00 грн</span><span class="plan__period">/12 днів</span>
+                <span class="plan__amount">389,99 грн</span><span class="plan__period">/12 днів</span>
               </div>
 
               <div class="plan__banner">
@@ -830,7 +830,7 @@ $isAdminUi = !empty($_SESSION['is_admin']) && $_SESSION['is_admin'] === true;
             <div class="exam-date__kicker">→ Режим «іспит» на платформі: таймер, випадкові питання, ліміт помилок.</div>
             <div class="exam-date__big">
               <div>План на 7 днів:</div>
-              <div class="exam-date__value">30–60 хв щодня + повтор помилок</div>
+              <div class="exam-date__value">30–60 хв щодня + повторення помилок</div>
             </div>
           </div>
           <a class="btn btn--xl btn--accent" href="#pricing">Почати</a>
@@ -1144,5 +1144,7 @@ $isAdminUi = !empty($_SESSION['is_admin']) && $_SESSION['is_admin'] === true;
       });
     })();
   </script>
+
+  <?php require_once __DIR__ . '/partials/chat_widget.php'; ?>
 </body>
 </html>

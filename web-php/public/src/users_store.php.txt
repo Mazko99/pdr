@@ -17,6 +17,16 @@ declare(strict_types=1);
  *       "expires_at":null,
  *       "created_at":"2026-02-21T10:00:00+00:00"
  *     }
+ *   ],
+ *   "oauth": [
+ *     {
+ *       "provider":"google|apple",
+ *       "sub":"provider_user_id",
+ *       "user_id":"1",
+ *       "email":"optional",
+ *       "name":"optional",
+ *       "linked_at":"2026-02-21T10:00:00+00:00"
+ *     }
  *   ]
  * }
  */
@@ -26,28 +36,32 @@ function users_store_path(): string {
 }
 
 /**
- * Завжди повертає ['users' => [...]]
+ * Завжди повертає ['users' => [...], 'oauth' => [...]]
  * Підхоплює старі/криві формати (мапа, список, тощо), але нормалізує на save.
  */
 function users_load(): array {
   $path = users_store_path();
-  if (!is_file($path)) return ['users' => []];
+  if (!is_file($path)) return ['users' => [], 'oauth' => []];
 
   $raw = (string)file_get_contents($path);
-  if (trim($raw) === '') return ['users' => []];
+  if (trim($raw) === '') return ['users' => [], 'oauth' => []];
 
   $data = json_decode($raw, true);
-  if (!is_array($data)) return ['users' => []];
+  if (!is_array($data)) return ['users' => [], 'oauth' => []];
 
-  // Вже правильний формат
+  // Правильний формат (users + optional oauth)
   if (isset($data['users']) && is_array($data['users'])) {
     $users = array_values(array_filter($data['users'], 'is_array'));
-    return ['users' => $users];
+    $oauth = [];
+    if (isset($data['oauth']) && is_array($data['oauth'])) {
+      $oauth = array_values(array_filter($data['oauth'], 'is_array'));
+    }
+    return ['users' => $users, 'oauth' => $oauth];
   }
 
   // Якщо напряму список користувачів
   if (array_is_list($data) && (count($data) === 0 || is_array($data[0]))) {
-    return ['users' => array_values(array_filter($data, 'is_array'))];
+    return ['users' => array_values(array_filter($data, 'is_array')), 'oauth' => []];
   }
 
   // Якщо це мапа id => user
@@ -59,29 +73,48 @@ function users_load(): array {
   if ($isMap) {
     $users = [];
     foreach ($data as $u) $users[] = $u;
-    return ['users' => array_values(array_filter($users, 'is_array'))];
+    return ['users' => array_values(array_filter($users, 'is_array')), 'oauth' => []];
   }
 
-  return ['users' => []];
+  return ['users' => [], 'oauth' => []];
 }
 
 /**
  * Атомарний запис, щоб users.json не ламався і не з'являлись "0": {...}
+ * Пише і users, і oauth.
  */
 function users_save(array $store): void {
   $path = users_store_path();
 
   if (!isset($store['users']) || !is_array($store['users'])) {
-    $store = ['users' => []];
+    $store['users'] = [];
+  }
+  if (!isset($store['oauth']) || !is_array($store['oauth'])) {
+    $store['oauth'] = [];
   }
 
-  // нормалізуємо та чистимо
-  $out = [];
+  // нормалізуємо та чистимо users
+  $outUsers = [];
   foreach ($store['users'] as $u) {
     if (!is_array($u)) continue;
     $nu = user_normalize($u);
     if ($nu['id'] === '') continue;
-    $out[] = $nu;
+    $outUsers[] = $nu;
+  }
+
+  // нормалізуємо oauth
+  $outOauth = [];
+  $seen = []; // provider|sub => true (щоб не було дублів)
+  foreach ($store['oauth'] as $row) {
+    if (!is_array($row)) continue;
+    $nr = oauth_normalize($row);
+    if ($nr['provider'] === '' || $nr['sub'] === '' || $nr['user_id'] === '') continue;
+
+    $key = $nr['provider'] . '|' . $nr['sub'];
+    if (isset($seen[$key])) continue;
+    $seen[$key] = true;
+
+    $outOauth[] = $nr;
   }
 
   $dir = dirname($path);
@@ -89,7 +122,10 @@ function users_save(array $store): void {
     @mkdir($dir, 0775, true);
   }
 
-  $json = json_encode(['users' => array_values($out)], JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
+  $json = json_encode(
+    ['users' => array_values($outUsers), 'oauth' => array_values($outOauth)],
+    JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT
+  );
   if ($json === false) {
     throw new RuntimeException('users_save: json_encode failed');
   }
@@ -222,6 +258,148 @@ function user_normalize(array $u): array {
 function users_repair_and_save(): void {
   $store = users_load();
   users_save($store);
+}
+
+/* ============================================================
+   ✅ OAUTH (Google/Apple)
+   users.json:
+   {
+     "users": [...],
+     "oauth": [
+       {"provider":"google","sub":"...","user_id":"...","email":"...","name":"...","linked_at":"..."}
+     ]
+   }
+============================================================ */
+
+function oauth_normalize(array $row): array {
+  $provider = strtolower(trim((string)($row['provider'] ?? '')));
+  $sub = trim((string)($row['sub'] ?? ''));
+  $userId = trim((string)($row['user_id'] ?? ''));
+
+  $email = trim((string)($row['email'] ?? ''));
+  $name  = trim((string)($row['name'] ?? ''));
+
+  $linkedAt = (string)($row['linked_at'] ?? '');
+  if ($linkedAt === '') $linkedAt = gmdate('c');
+
+  return [
+    'provider' => $provider,
+    'sub' => $sub,
+    'user_id' => $userId,
+    'email' => $email,
+    'name' => $name,
+    'linked_at' => $linkedAt,
+  ];
+}
+
+/**
+ * Повертає запис oauth або null
+ */
+function oauth_find(string $provider, string $sub): ?array {
+  $provider = strtolower(trim($provider));
+  $sub = trim($sub);
+  if ($provider === '' || $sub === '') return null;
+
+  $store = users_load();
+  $list = $store['oauth'] ?? [];
+  if (!is_array($list)) return null;
+
+  foreach ($list as $row) {
+    if (!is_array($row)) continue;
+    $r = oauth_normalize($row);
+    if ($r['provider'] === $provider && $r['sub'] === $sub) return $r;
+  }
+  return null;
+}
+
+/**
+ * Повертає user_id за provider+sub або null
+ */
+function oauth_user_id_by_provider_sub(string $provider, string $sub): ?string {
+  $r = oauth_find($provider, $sub);
+  if (!$r) return null;
+  $uid = (string)($r['user_id'] ?? '');
+  return $uid !== '' ? $uid : null;
+}
+
+/**
+ * Знайти oauth-зв’язок по email (інколи корисно для Apple: email приходить 1 раз).
+ */
+function oauth_find_by_email(string $provider, string $email): ?array {
+  $provider = strtolower(trim($provider));
+  $email = strtolower(trim($email));
+  if ($provider === '' || $email === '') return null;
+
+  $store = users_load();
+  $list = $store['oauth'] ?? [];
+  if (!is_array($list)) return null;
+
+  foreach ($list as $row) {
+    if (!is_array($row)) continue;
+    $r = oauth_normalize($row);
+    if ($r['provider'] !== $provider) continue;
+    if (strtolower($r['email'] ?? '') === $email) return $r;
+  }
+  return null;
+}
+
+/**
+ * Прив’язати provider+sub до user_id (без дублювань).
+ * Якщо вже є — оновить email/name якщо передані.
+ */
+function oauth_link(string $provider, string $sub, string $userId, string $email = '', string $name = ''): array {
+  $provider = strtolower(trim($provider));
+  $sub = trim($sub);
+  $userId = trim($userId);
+  $email = trim($email);
+  $name = trim($name);
+
+  if ($provider === '' || $sub === '' || $userId === '') {
+    throw new InvalidArgumentException('oauth_link: provider/sub/userId required');
+  }
+
+  $store = users_load();
+  $list = $store['oauth'] ?? [];
+  if (!is_array($list)) $list = [];
+
+  $found = false;
+  for ($i = 0; $i < count($list); $i++) {
+    if (!is_array($list[$i])) continue;
+    $r = oauth_normalize($list[$i]);
+
+    if ($r['provider'] === $provider && $r['sub'] === $sub) {
+      $found = true;
+      $r['user_id'] = $userId; // якщо треба “переприв’язати”
+      if ($email !== '') $r['email'] = $email;
+      if ($name !== '') $r['name'] = $name;
+      // linked_at залишаємо як є
+      $list[$i] = $r;
+      break;
+    }
+  }
+
+  if (!$found) {
+    $list[] = oauth_normalize([
+      'provider' => $provider,
+      'sub' => $sub,
+      'user_id' => $userId,
+      'email' => $email,
+      'name' => $name,
+      'linked_at' => gmdate('c'),
+    ]);
+  }
+
+  $store['oauth'] = array_values($list);
+  users_save($store);
+
+  return oauth_find($provider, $sub) ?? oauth_normalize([
+    'provider' => $provider,
+    'sub' => $sub,
+    'user_id' => $userId,
+    'email' => $email,
+    'name' => $name,
+    'linked_at' => gmdate('c'),
+  ]);
 }
 
 /* ============================================================
@@ -441,4 +619,79 @@ function sessions_revoke_all_for_user(string $uid, ?string $exceptSid = null): v
   }
 
   sessions_save($data);
+}
+// ======================================================
+// ================== SESSIONS STORAGE ==================
+// ======================================================
+
+function sessions_path(): string {
+  return dirname(__DIR__) . '/storage/sessions.json';
+}
+
+function sessions_read(): array {
+  $path = sessions_path();
+  if (!is_file($path)) return [];
+  $raw = file_get_contents($path);
+  if (!is_string($raw) || $raw === '') return [];
+  $json = json_decode($raw, true);
+  return is_array($json) ? $json : [];
+}
+
+function sessions_write(array $data): void {
+  $path = sessions_path();
+  $dir = dirname($path);
+  if (!is_dir($dir)) mkdir($dir, 0777, true);
+  file_put_contents($path, json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+}
+
+function session_register_current(string $userId, string $label = ''): void {
+  if (session_status() !== PHP_SESSION_ACTIVE) return;
+
+  $sid = session_id();
+  if ($sid === '') return;
+
+  $all = sessions_read();
+
+  $all[$userId] = $all[$userId] ?? [];
+
+  $all[$userId][$sid] = [
+    'sid' => $sid,
+    'label' => $label,
+    'ip' => $_SERVER['REMOTE_ADDR'] ?? '',
+    'ua' => $_SERVER['HTTP_USER_AGENT'] ?? '',
+    'created_at' => date('c'),
+    'last_seen' => date('c'),
+  ];
+
+  sessions_write($all);
+}
+
+function sessions_list_for_user(string $userId): array {
+  $all = sessions_read();
+  if (empty($all[$userId])) return [];
+  return array_values($all[$userId]);
+}
+
+function sessions_revoke_all_for_user(string $userId, ?string $exceptSid = null): void {
+  $all = sessions_read();
+  if (empty($all[$userId])) return;
+
+  foreach ($all[$userId] as $sid => $row) {
+    if ($exceptSid !== null && $sid === $exceptSid) continue;
+    unset($all[$userId][$sid]);
+  }
+
+  sessions_write($all);
+}
+
+function session_revoke_for_user(string $userId, string $sid): void {
+  $all = sessions_read();
+  if (!empty($all[$userId][$sid])) {
+    unset($all[$userId][$sid]);
+    sessions_write($all);
+  }
+}
+
+function session_current_id_safe(): string {
+  return session_status() === PHP_SESSION_ACTIVE ? session_id() : '';
 }

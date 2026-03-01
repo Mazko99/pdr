@@ -243,3 +243,117 @@ function users_repair_and_save(): void {
   $store = users_load();
   users_save($store);
 }
+// ======================================================
+// ================== SESSIONS STORAGE ==================
+// ======================================================
+
+function sessions_path(): string {
+  return dirname(__DIR__) . '/storage/sessions.json';
+}
+
+function sessions_read(): array {
+  $path = sessions_path();
+  if (!is_file($path)) return [];
+  $raw = file_get_contents($path);
+  if (!is_string($raw) || $raw === '') return [];
+  $json = json_decode($raw, true);
+  return is_array($json) ? $json : [];
+}
+
+function sessions_write(array $data): void {
+  $path = sessions_path();
+  $dir = dirname($path);
+  if (!is_dir($dir)) mkdir($dir, 0777, true);
+  file_put_contents($path, json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+}
+
+function session_register_current(string $userId, string $label = ''): void {
+  if (session_status() !== PHP_SESSION_ACTIVE) return;
+
+  $sid = session_id();
+  if ($sid === '') return;
+
+  $all = sessions_read();
+
+  $all[$userId] = $all[$userId] ?? [];
+
+  $all[$userId][$sid] = [
+    'sid' => $sid,
+    'label' => $label,
+    'ip' => $_SERVER['REMOTE_ADDR'] ?? '',
+    'ua' => $_SERVER['HTTP_USER_AGENT'] ?? '',
+    'created_at' => date('c'),
+    'last_seen' => date('c'),
+  ];
+
+  sessions_write($all);
+}
+
+function sessions_list_for_user(string $userId): array {
+  $all = sessions_read();
+  if (empty($all[$userId])) return [];
+  return array_values($all[$userId]);
+}
+
+function sessions_revoke_all_for_user(string $userId, ?string $exceptSid = null): void {
+  $all = sessions_read();
+  if (empty($all[$userId])) return;
+
+  foreach ($all[$userId] as $sid => $row) {
+    if ($exceptSid !== null && $sid === $exceptSid) continue;
+    unset($all[$userId][$sid]);
+  }
+
+  sessions_write($all);
+}
+
+function session_revoke_for_user(string $userId, string $sid): void {
+  $all = sessions_read();
+  if (!empty($all[$userId][$sid])) {
+    unset($all[$userId][$sid]);
+    sessions_write($all);
+  }
+}
+
+function session_current_id_safe(): string {
+  return session_status() === PHP_SESSION_ACTIVE ? session_id() : '';
+}
+<?php
+// ... (твій файл вище)
+
+function user_set_plan(string $userId, string $plan, int $days): bool {
+  $userId = (string)$userId;
+  if ($userId === '') return false;
+
+  $users = users_load(); // у тебе вже є/або еквівалент
+  // якщо в тебе інша функція читання — заміни на свою, але логіку лиши
+
+  // НОРМ: у тебе формат { "users": [ ... ] }
+  if (!isset($users['users']) || !is_array($users['users'])) {
+    // fallback якщо раптом інший формат
+    $users = ['users' => is_array($users) ? $users : []];
+  }
+
+  $now = time();
+  $expires = ($days > 0) ? gmdate('c', $now + $days * 86400) : null;
+
+  $changed = false;
+
+  foreach ($users['users'] as &$u) {
+    if (!is_array($u)) continue;
+    if ((string)($u['id'] ?? '') !== $userId) continue;
+
+    $u['plan'] = $plan;
+    $u['paid_at'] = gmdate('c'); // навіть для trial: це “момент активації”
+    $u['expires_at'] = $expires;
+    $u['plan_set_at'] = gmdate('c');
+    $changed = true;
+    break;
+  }
+  unset($u);
+
+  if (!$changed) return false;
+
+  users_save($users); // у тебе вже є/або еквівалент
+  return true;
+}

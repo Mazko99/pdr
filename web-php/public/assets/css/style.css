@@ -671,6 +671,10 @@ button{ font:inherit; }
   position:relative;
   overflow:hidden;
 }
+  .big-step__left{
+  position: relative;
+  padding-bottom: 70px; /* резерв місця, щоб цифра не лізла на текст */
+}
 .big-step__title{
   font-family: var(--font-display);
   font-size: clamp(22px, 2.6vw, 36px);
@@ -679,19 +683,19 @@ button{ font:inherit; }
 }
 .big-step__badge{
   position:absolute;
-  left: 22px;
-  bottom: 18px;
+  left: 0;
+  bottom: 0;
   width: 54px;
   height: 54px;
   border-radius: 999px;
-  border: 2px solid rgba(11,27,20,.50);
+  border: 2px solid rgba(11,27,20,50);
   display:flex;
   align-items:center;
   justify-content:center;
   font-family: var(--font-display);
   font-weight: 700;
-  color: rgba(11,27,20,.84);
-  background: rgba(255,255,255,.85);
+  color: rgba(11,27,20,84);
+  background: rgba(255,255,255,85);
 }
 .big-step__right{ width:100%; }
 .big-step__img{
@@ -1456,5 +1460,23 @@ body.quiz-page .tests-topbar {
     width:100%;
 
 }
+
+}
+/* Центрування тексту в карточці Іспит на мобільному */
+@media (max-width: 768px){
+
+  .stat__text{
+    text-align: center;
+    margin-left: auto;
+    margin-right: auto;
+  }
+
+  .stat__big{
+    text-align: center;
+  }
+
+  .stat{
+    text-align: center;
+  }
 
 }

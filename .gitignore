@@ -1,0 +1,4 @@
+echo .env>> .gitignore
+echo .env.txt>> .gitignore
+echo web-php/.env>> .gitignore
+echo web-php/.env.txt>> .gitignore

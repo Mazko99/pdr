@@ -143,6 +143,48 @@ $csrf = csrf_token();
     @media (max-width: 980px){
       .auth-wrap{ grid-template-columns: 1fr; }
     }
+
+    /* ✅ ДОДАНО: OAuth блок */
+    .oauth-sep{
+      display:flex;
+      align-items:center;
+      gap:12px;
+      margin: 14px 0 10px;
+      color: rgba(11,27,20,.55);
+      font-weight: 800;
+    }
+    .oauth-sep:before,
+    .oauth-sep:after{
+      content:"";
+      height:1px;
+      flex:1;
+      background: rgba(11,27,20,.12);
+    }
+    .btn-oauth{
+      width:100%;
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      gap:10px;
+      padding: 12px 14px;
+      border-radius: 16px;
+      border: 1px solid rgba(11,27,20,.14);
+      background:#fff;
+      font-weight: 900;
+      text-decoration:none;
+      color: rgba(11,27,20,.92);
+      box-shadow: 0 6px 18px rgba(0,0,0,.05);
+    }
+    .btn-oauth:hover{
+      border-color: rgba(14,122,67,.22);
+      box-shadow: 0 10px 26px rgba(0,0,0,.07);
+      transform: translateY(-1px);
+    }
+    .btn-oauth__icon{
+      width:18px;
+      height:18px;
+      display:inline-block;
+    }
   </style>
 </head>
 
@@ -208,11 +250,27 @@ $csrf = csrf_token();
               <button class="btn btn--primary btn--xl" type="submit" id="submitBtn">Увійти</button>
             </div>
           </form>
+
+          <!-- ✅ ДОДАНО: Вхід через Google -->
+          <div class="oauth-sep">або</div>
+          <div class="row">
+            <a class="btn-oauth" href="/auth/google/start.php" aria-label="Увійти через Google">
+              <!-- inline Google icon (простий) -->
+              <svg class="btn-oauth__icon" viewBox="0 0 48 48" aria-hidden="true">
+                <path fill="#FFC107" d="M43.611 20.083H42V20H24v8h11.303C33.652 32.659 29.215 36 24 36c-6.627 0-12-5.373-12-12s5.373-12 12-12c3.059 0 5.842 1.154 7.957 3.043l5.657-5.657C34.046 6.053 29.268 4 24 4 12.955 4 4 12.955 4 24s8.955 20 20 20 20-8.955 20-20c0-1.341-.138-2.65-.389-3.917z"/>
+                <path fill="#FF3D00" d="M6.306 14.691l6.571 4.819C14.655 16.108 19.001 12 24 12c3.059 0 5.842 1.154 7.957 3.043l5.657-5.657C34.046 6.053 29.268 4 24 4c-7.682 0-14.39 4.326-17.694 10.691z"/>
+                <path fill="#4CAF50" d="M24 44c5.115 0 9.814-1.963 13.351-5.165l-6.166-5.218C29.169 35.091 26.715 36 24 36c-5.193 0-9.615-3.317-11.273-7.946l-6.52 5.026C9.463 39.556 16.227 44 24 44z"/>
+                <path fill="#1976D2" d="M43.611 20.083H42V20H24v8h11.303c-.792 2.251-2.244 4.153-4.118 5.617l.003-.002 6.166 5.218C36.9 39.233 44 34 44 24c0-1.341-.138-2.65-.389-3.917z"/>
+              </svg>
+              Увійти через Google
+            </a>
+          </div>
+
         </section>
 
         <aside class="auth-side">
           <h2 class="auth-title">Що дає акаунт ProstoPDR</h2>
-          <p class="auth-sub">Після входу ти отримуєш персональний прогрес і повтор помилок.</p>
+          <p class="auth-sub">Після входу ти отримуєш персональний прогрес і повторення помилок.</p>
           <ul>
             <li>Статистика прогресу по днях</li>
             <li>Повторення помилок і слабких тем</li>

@@ -55,7 +55,7 @@ $mistakes = !empty($_GET['mistakes']); // trainer special: repeat mistakes
 // НАЛАШТУВАННЯ (як ти просив)
 const EXAM_QUESTIONS = 40;
 const EXAM_TIME_SEC  = 40 * 60; // 40 хв
-const EXAM_MISTAKES  = 3;
+const EXAM_MISTAKES  = 10;
 
 const TRAINER_QUESTIONS = 40; // 40 питань, без часу
 
@@ -109,6 +109,9 @@ if (!is_array($userProgress)) $userProgress = [];
 $passedTests = $userProgress['passed_tests'] ?? [];
 if (!is_array($passedTests)) $passedTests = [];
 
+$theoryDoneMap = $userProgress['theory_done'] ?? [];
+if (!is_array($theoryDoneMap)) $theoryDoneMap = [];
+
 // quick map
 $qMap = [];
 foreach ($questions as $q) {
@@ -151,7 +154,7 @@ $allPool = [];           // all qids (АЛЕ тільки з дозволени�
 
 $allowedQidSet = []; // qid => true (лише з тестів до cutoff)
 
-// ===== ДОДАНО: айді тестів по темах для ЛОГІКИ ВІДКРИТТЯ ІСПИТІВ =====
+// ===== ДОДАНО: айді тестів по темах для ЛОГІКИ ВІДКРИТТЯ ІСПИТІВ + СЕКВЕНЦІЇ =====
 $topicTestIds = []; // topic => [testId1, testId2, ...]
 $allTestIds   = []; // всі test_id з усіх тем
 
@@ -213,7 +216,7 @@ function all_tests_passed(array $testIds, array $passedTests): bool {
   return true;
 }
 
-$title = 'Підготовчі запитання до іспиту';
+$title = 'Тести';
 if ($mode === 'exam') $title = 'Іспит';
 if ($mode === 'trainer') $title = 'Тренажер';
 
@@ -258,87 +261,63 @@ $csrf = csrf_token();
     <?php if ($mode === 'exam'): ?>
 
       <!-- =========================
-           ІСПИТИ (ПО ТЕМАХ + МІКС)
-           ЛОГІКА: іспит по темі відкривається тільки якщо складені ВСІ тести цієї теми
+           ІСПИТИ
            ========================= -->
+      <div class="topic-block">
+        <div class="topic-block__head">
+          <h3 class="h3">Змішаний іспит (всі теми)</h3>
+        </div>
 
-      <?php
-        $mixedUnlocked = all_tests_passed(array_keys($allTestIds), $passedTests);
-      ?>
+        <?php
+          // ✅ змішаний іспит доступний тільки після того, як користувач склав ВСІ тести (по всіх темах)
+          $mixedUnlocked = all_tests_passed(array_keys($allTestIds), $passedTests);
+        ?>
 
-      <div class="account-card" style="margin-top:12px;">
-        <h3 class="h3" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-          <span>Змішаний іспит (всі теми)</span>
-          <?php if (!$mixedUnlocked): ?>
-            <span style="display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border-radius:999px;background:#f3f4f6;color:#111827;font-weight:800;font-size:12px;line-height:1;">
-              <span aria-hidden="true" style="font-size:14px;">🔒</span>
-              <span>Заблоковано</span>
-            </span>
-          <?php endif; ?>
-        </h3>
-
-        <p class="lead" style="margin-top:6px;">
-          40 питань • 40 хв • 3 помилки • випадково з усіх тем
-        </p>
-
-        <?php if (!$mixedUnlocked): ?>
-          <p class="lead" style="margin-top:8px;">
-            Щоб відкрити змішаний іспит — склади <b>усі тести по всіх темах</b>.
-          </p>
-        <?php endif; ?>
-
-        <div style="margin-top:12px; display:flex; gap:12px; flex-wrap:wrap;">
-          <form method="post" action="/account/quiz.php">
-            <input type="hidden" name="csrf" value="<?php echo h($csrf); ?>">
-            <input type="hidden" name="action" value="start">
-            <input type="hidden" name="mode" value="exam_mix">
-            <input type="hidden" name="seed" value="<?php echo (int)random_int(1, 1000000000); ?>">
-            <button class="btn btn--primary" type="submit" <?php echo $mixedUnlocked ? '' : 'disabled style="opacity:.55;cursor:not-allowed;"'; ?>>
-              <?php echo $mixedUnlocked ? 'Почати змішаний іспит →' : 'Почати (заблоковано)'; ?>
-            </button>
-          </form>
+        <div class="test-card">
+          <div class="test-card__left">
+            <div class="test-card__title">Змішаний іспит</div>
+            <div class="test-card__meta">
+              <span>Питань: <b><?php echo (int)EXAM_QUESTIONS; ?></b></span>
+              <span>Час: <b><?php echo (int)round(EXAM_TIME_SEC/60); ?> хв</b></span>
+              <span>Помилок: <b><?php echo (int)EXAM_MISTAKES; ?></b></span>
+            </div>
+          </div>
+          <div class="test-card__right">
+            <form method="post" action="/account/quiz.php">
+              <input type="hidden" name="csrf" value="<?php echo h($csrf); ?>">
+              <input type="hidden" name="action" value="start">
+              <input type="hidden" name="mode" value="exam_mix">
+              <input type="hidden" name="seed" value="<?php echo (int)random_int(1, 1000000000); ?>">
+              <button class="btn btn--primary" type="submit" <?php echo $mixedUnlocked ? '' : 'disabled style="opacity:.55;cursor:not-allowed;"'; ?>>
+                <?php echo $mixedUnlocked ? 'Почати змішаний іспит →' : 'Почати (заблоковано)'; ?>
+              </button>
+            </form>
+          </div>
         </div>
       </div>
 
       <?php foreach ($topicPools as $topicName => $pool): ?>
         <?php
           $total = count($pool);
-          if ($total <= 0) continue;
+          if ($total < 1) continue;
 
           $parts = (int)ceil($total / EXAM_QUESTIONS);
+          if ($parts < 1) $parts = 1;
 
+          // ✅ відкриваємо іспити по темі тільки після того, як користувач склав ВСІ тести цієї теми
           $topicUnlocked = all_tests_passed($topicTestIds[$topicName] ?? [], $passedTests);
         ?>
 
-        <div class="topic-block" style="margin-top:14px;">
-          <div class="topic-block__head" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
-            <h3 class="h3" style="margin:0;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-              <span><?php echo h($topicName); ?></span>
-              <?php if (!$topicUnlocked): ?>
-                <span style="display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border-radius:999px;background:#f3f4f6;color:#111827;font-weight:800;font-size:12px;line-height:1;">
-                  <span aria-hidden="true" style="font-size:14px;">🔒</span>
-                  <span>Заблоковано</span>
-                </span>
-              <?php endif; ?>
-            </h3>
+        <div class="topic-block">
+          <div class="topic-block__head">
+            <h3 class="h3"><?php echo h($topicName); ?></h3>
           </div>
-
-          <?php if (!$topicUnlocked): ?>
-            <div class="account-card" style="margin-top:10px;">
-              <p class="lead" style="margin:0;">
-                Щоб відкрити іспити по темі <b><?php echo h($topicName); ?></b> — склади <b>усі тести цієї теми</b>.
-              </p>
-            </div>
-          <?php endif; ?>
 
           <div class="topic-tests">
             <?php for ($p = 1; $p <= $parts; $p++): ?>
-              <?php
-                $seed = (int)abs(crc32($topicName . '|' . $p . '|exam'));
-              ?>
               <div class="test-card">
                 <div class="test-card__left">
-                  <div class="test-card__title"><?php echo h("Іспит {$p} (по темі)"); ?></div>
+                  <div class="test-card__title">Іспит <?php echo (int)$p; ?></div>
                   <div class="test-card__meta">
                     <span>Питань: <b><?php echo (int)EXAM_QUESTIONS; ?></b></span>
                     <span>Час: <b><?php echo (int)round(EXAM_TIME_SEC/60); ?> хв</b></span>
@@ -352,9 +331,9 @@ $csrf = csrf_token();
                     <input type="hidden" name="mode" value="exam_topic">
                     <input type="hidden" name="topic" value="<?php echo h($topicName); ?>">
                     <input type="hidden" name="part" value="<?php echo (int)$p; ?>">
-                    <input type="hidden" name="seed" value="<?php echo (int)$seed; ?>">
+                    <input type="hidden" name="seed" value="<?php echo (int)random_int(1, 1000000000); ?>">
                     <button class="btn btn--primary" type="submit" <?php echo $topicUnlocked ? '' : 'disabled style="opacity:.55;cursor:not-allowed;"'; ?>>
-                      <?php echo $topicUnlocked ? 'Почати' : 'Почати (🔒)'; ?>
+                      <?php echo $topicUnlocked ? 'Почати →' : 'Почати (заблоковано)'; ?>
                     </button>
                   </form>
                 </div>
@@ -369,69 +348,74 @@ $csrf = csrf_token();
     <?php elseif ($mode === 'trainer'): ?>
 
       <!-- =========================
-           ТРЕНАЖЕР (ПО ТЕМАХ + МІКС + ПОМИЛКИ)
+           ТРЕНАЖЕР
            ========================= -->
-
-      <div class="account-card" style="margin-top:12px;">
-        <h3 class="h3">Тренажер (мікс)</h3>
-        <p class="lead" style="margin-top:6px;">
-          40 питань • без таймера • випадково з усіх тем • пояснення по всіх питаннях
-        </p>
-
-        <div style="margin-top:12px; display:flex; gap:12px; flex-wrap:wrap;">
-          <form method="post" action="/account/quiz.php">
-            <input type="hidden" name="csrf" value="<?php echo h($csrf); ?>">
-            <input type="hidden" name="action" value="start">
-            <input type="hidden" name="mode" value="trainer_mix">
-            <input type="hidden" name="seed" value="<?php echo (int)random_int(1, 1000000000); ?>">
-            <button class="btn btn--primary" type="submit">Почати мікс →</button>
-          </form>
-
-          <a class="btn btn--ghost" href="/account/tests.php?mode=trainer&mistakes=1">Повтор помилок →</a>
+      <div class="topic-block">
+        <div class="topic-block__head">
+          <h3 class="h3">Тренажер (всі теми)</h3>
         </div>
-      </div>
 
-      <?php if ($mistakes): ?>
-        <div class="account-card" style="margin-top:12px;">
-          <h3 class="h3">Повтор помилок</h3>
-          <p class="lead" style="margin-top:6px;">
-            Лише питання, де були помилки
-          </p>
-
-          <div style="margin-top:12px; display:flex; gap:12px; flex-wrap:wrap;">
-            <form method="post" action="/account/quiz.php">
-              <input type="hidden" name="csrf" value="<?php echo h($csrf); ?>">
-              <input type="hidden" name="action" value="start">
-              <input type="hidden" name="mode" value="trainer">
-              <input type="hidden" name="mistakes_only" value="1">
-              <button class="btn btn--primary" type="submit">Почати повтор →</button>
-            </form>
-            <a class="btn btn--ghost" href="/account/tests.php?mode=trainer">Назад до тренажера</a>
-          </div>
-        </div>
-      <?php endif; ?>
-
-      <?php foreach ($topicPools as $topicName => $pool): ?>
-        <?php if (count($pool) <= 0) continue; ?>
-        <div class="test-card" style="margin-top:12px;">
+        <div class="test-card">
           <div class="test-card__left">
-            <div class="test-card__title"><?php echo h($topicName); ?></div>
+            <div class="test-card__title">Змішаний тренажер</div>
             <div class="test-card__meta">
               <span>Питань: <b><?php echo (int)TRAINER_QUESTIONS; ?></b></span>
-              <span>Час: <b>без таймера</b></span>
+              <span>Час: <b>без обмежень</b></span>
+              <span>Помилок: <b>без обмежень</b></span>
             </div>
           </div>
           <div class="test-card__right">
             <form method="post" action="/account/quiz.php">
               <input type="hidden" name="csrf" value="<?php echo h($csrf); ?>">
               <input type="hidden" name="action" value="start">
-              <input type="hidden" name="mode" value="trainer_topic">
-              <input type="hidden" name="topic" value="<?php echo h($topicName); ?>">
+              <input type="hidden" name="mode" value="trainer_mix">
               <input type="hidden" name="seed" value="<?php echo (int)random_int(1, 1000000000); ?>">
-              <button class="btn btn--primary" type="submit">Тренуватись</button>
+              <button class="btn btn--primary" type="submit">Почати →</button>
             </form>
           </div>
         </div>
+      </div>
+
+      <?php foreach ($topicPools as $topicName => $pool): ?>
+        <?php
+          $total = count($pool);
+          if ($total < 1) continue;
+          $parts = (int)ceil($total / TRAINER_QUESTIONS);
+          if ($parts < 1) $parts = 1;
+        ?>
+
+        <div class="topic-block">
+          <div class="topic-block__head">
+            <h3 class="h3"><?php echo h($topicName); ?></h3>
+          </div>
+
+          <div class="topic-tests">
+            <?php for ($p = 1; $p <= $parts; $p++): ?>
+              <div class="test-card">
+                <div class="test-card__left">
+                  <div class="test-card__title">Тренажер <?php echo (int)$p; ?></div>
+                  <div class="test-card__meta">
+                    <span>Питань: <b><?php echo (int)TRAINER_QUESTIONS; ?></b></span>
+                    <span>Час: <b>без обмежень</b></span>
+                    <span>Помилок: <b>без обмежень</b></span>
+                  </div>
+                </div>
+                <div class="test-card__right">
+                  <form method="post" action="/account/quiz.php">
+                    <input type="hidden" name="csrf" value="<?php echo h($csrf); ?>">
+                    <input type="hidden" name="action" value="start">
+                    <input type="hidden" name="mode" value="trainer_topic">
+                    <input type="hidden" name="topic" value="<?php echo h($topicName); ?>">
+                    <input type="hidden" name="part" value="<?php echo (int)$p; ?>">
+                    <input type="hidden" name="seed" value="<?php echo (int)random_int(1, 1000000000); ?>">
+                    <button class="btn btn--primary" type="submit">Почати →</button>
+                  </form>
+                </div>
+              </div>
+            <?php endfor; ?>
+          </div>
+        </div>
+
       <?php endforeach; ?>
 
 
@@ -447,6 +431,20 @@ $csrf = csrf_token();
             <h3 class="h3"><?php echo h($topicName); ?></h3>
           </div>
 
+          <?php
+            $theoryDone = !empty($theoryDoneMap[$topicName]['done']);
+            $orderIds = $topicTestIds[$topicName] ?? [];
+            if (!is_array($orderIds)) $orderIds = [];
+            $posMap = [];
+            $iPos = 0;
+            foreach ($orderIds as $oid) { $oid = (int)$oid; if ($oid > 0) { $posMap[$oid] = $iPos; $iPos++; } }
+          ?>
+          <div class="topic-block__actions" style="margin-top:10px;display:flex;gap:10px;flex-wrap:wrap;">
+            <a class="btn btn--ghost" href="/account/theory.php?topic=<?php echo urlencode($topicName); ?>">
+              Теоретичний матеріал<?php echo $theoryDone ? ' ✅' : ''; ?>
+            </a>
+          </div>
+
           <div class="topic-tests">
             <?php foreach ($items as $t): ?>
               <?php if (($t['type'] ?? 'test') !== 'test') continue; ?>
@@ -457,14 +455,28 @@ $csrf = csrf_token();
                 $time = (int)($t['time_limit_sec'] ?? 1200);
                 if ($time <= 0) $time = 1200;
 
-                // як ти хотів — 3 помилки
-                $mist = 3;
+                // ✅ як ти просив — 10 помилок
+                $mist = 10;
               ?>
               <div class="test-card">
                 <div class="test-card__left">
                   <?php
                     $tid = (int)($t['id'] ?? 0);
                     $isPassed = ($tid > 0) && !empty($passedTests[(string)$tid]);
+
+                    $pos = $posMap[$tid] ?? 0;
+                    $locked = false;
+                    $lockReason = '';
+                    if (!$theoryDone) {
+                      $locked = true;
+                      $lockReason = 'Спочатку відкрий теорію';
+                    } elseif ($pos > 0) {
+                      $prevTid = (int)($orderIds[$pos - 1] ?? 0);
+                      if ($prevTid > 0 && empty($passedTests[(string)$prevTid])) {
+                        $locked = true;
+                        $lockReason = 'Спочатку пройди попередній тест';
+                      }
+                    }
                   ?>
                   <div class="test-card__title" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
                     <span><?php echo h((string)($t['title'] ?? 'Тест')); ?></span>
@@ -487,7 +499,9 @@ $csrf = csrf_token();
                     <input type="hidden" name="action" value="start">
                     <input type="hidden" name="mode" value="test">
                     <input type="hidden" name="test_id" value="<?php echo (int)($t['id'] ?? 0); ?>">
-                    <button class="btn btn--primary" type="submit">Почати</button>
+                    <button class="btn btn--primary" type="submit" <?php echo $locked ? 'disabled aria-disabled="true" style="opacity:.55;cursor:not-allowed;"' : ''; ?>>
+                      <?php echo $locked ? h($lockReason) : 'Почати'; ?>
+                    </button>
                   </form>
                 </div>
               </div>
@@ -500,6 +514,6 @@ $csrf = csrf_token();
 
   </div>
 </main>
-
+<?php require_once __DIR__ . '/../partials/chat_widget.php'; ?>
 </body>
 </html>

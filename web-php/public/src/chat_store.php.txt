@@ -5,11 +5,12 @@ declare(strict_types=1);
  * storage/chats.json
  * {
  *   "threads": {
- *     "USER_ID": {
- *       "user_id":"1",
+ *     "USER_ID_OR_GUEST_ID": {
+ *       "user_id":"1 or g_xxx",
  *       "updated_at":"...",
  *       "admin_unread": 0,
  *       "user_unread": 0,
+ *       "meta": { "name":"", "email":"" },
  *       "messages":[
  *         {"id":1,"from":"user|admin","text":"...","ts":"..."}
  *       ]
@@ -20,7 +21,7 @@ declare(strict_types=1);
  */
 
 function chats_store_path(): string {
-  return dirname(__DIR__) . '/storage/chats.json';
+  return dirname(__DIR__) . '/storage/chats.json'; // src/.. => project/storage/chats.json
 }
 
 function chats_load(): array {
@@ -28,20 +29,23 @@ function chats_load(): array {
   if (!is_file($p)) return ['threads' => [], 'last_id' => 0];
 
   $raw = (string)file_get_contents($p);
+  if (strncmp($raw, "\xEF\xBB\xBF", 3) === 0) $raw = substr($raw, 3);
   if (trim($raw) === '') return ['threads' => [], 'last_id' => 0];
 
   $data = json_decode($raw, true);
   if (!is_array($data)) return ['threads' => [], 'last_id' => 0];
 
   if (!isset($data['threads']) || !is_array($data['threads'])) $data['threads'] = [];
-  if (!isset($data['last_id']) || !is_int($data['last_id'])) $data['last_id'] = (int)($data['last_id'] ?? 0);
+  if (!isset($data['last_id'])) $data['last_id'] = 0;
+  $data['last_id'] = (int)$data['last_id'];
 
   return $data;
 }
 
 function chats_save(array $data): void {
   if (!isset($data['threads']) || !is_array($data['threads'])) $data['threads'] = [];
-  if (!isset($data['last_id']) || !is_int($data['last_id'])) $data['last_id'] = (int)($data['last_id'] ?? 0);
+  if (!isset($data['last_id'])) $data['last_id'] = 0;
+  $data['last_id'] = (int)$data['last_id'];
 
   $p = chats_store_path();
   $dir = dirname($p);
@@ -74,6 +78,7 @@ function chat_thread_get(string $userId): array {
       'updated_at' => gmdate('c'),
       'admin_unread' => 0,
       'user_unread' => 0,
+      'meta' => [],
       'messages' => [],
     ];
   }
@@ -81,18 +86,49 @@ function chat_thread_get(string $userId): array {
   if (!isset($t['messages']) || !is_array($t['messages'])) $t['messages'] = [];
   if (!isset($t['admin_unread'])) $t['admin_unread'] = 0;
   if (!isset($t['user_unread'])) $t['user_unread'] = 0;
+  if (!isset($t['meta']) || !is_array($t['meta'])) $t['meta'] = [];
 
   return $t;
 }
 
-function chat_message_add(string $userId, string $from, string $text): array {
+/**
+ * Оновлює meta (name/email) для треду, якщо прийшли непорожні значення
+ */
+function chat_thread_meta_merge(string $userId, array $meta): void {
+  $userId = (string)$userId;
+  $data = chats_load();
+  $t = $data['threads'][$userId] ?? null;
+  if (!is_array($t)) $t = chat_thread_get($userId);
+
+  if (!isset($t['meta']) || !is_array($t['meta'])) $t['meta'] = [];
+
+  $name = trim((string)($meta['name'] ?? ''));
+  $email = trim((string)($meta['email'] ?? ''));
+
+  if ($name !== '') $t['meta']['name'] = $name;
+  if ($email !== '') $t['meta']['email'] = $email;
+
+  $t['updated_at'] = gmdate('c');
+  $data['threads'][$userId] = $t;
+  chats_save($data);
+}
+
+function chat_message_add(string $userId, string $from, string $text, array $meta = []): array {
   $userId = (string)$userId;
   $from = $from === 'admin' ? 'admin' : 'user';
   $text = trim($text);
   if ($userId === '' || $text === '') return ['ok' => false];
 
   $data = chats_load();
-  $thread = chat_thread_get($userId);
+  $thread = $data['threads'][$userId] ?? null;
+  if (!is_array($thread)) $thread = chat_thread_get($userId);
+
+  // meta
+  if (!isset($thread['meta']) || !is_array($thread['meta'])) $thread['meta'] = [];
+  $name = trim((string)($meta['name'] ?? ''));
+  $email = trim((string)($meta['email'] ?? ''));
+  if ($name !== '') $thread['meta']['name'] = $name;
+  if ($email !== '') $thread['meta']['email'] = $email;
 
   $data['last_id'] = (int)$data['last_id'] + 1;
   $msg = [
@@ -102,14 +138,12 @@ function chat_message_add(string $userId, string $from, string $text): array {
     'ts' => gmdate('c'),
   ];
 
+  if (!isset($thread['messages']) || !is_array($thread['messages'])) $thread['messages'] = [];
   $thread['messages'][] = $msg;
   $thread['updated_at'] = gmdate('c');
 
-  if ($from === 'user') {
-    $thread['admin_unread'] = (int)($thread['admin_unread'] ?? 0) + 1;
-  } else {
-    $thread['user_unread'] = (int)($thread['user_unread'] ?? 0) + 1;
-  }
+  if ($from === 'user') $thread['admin_unread'] = (int)($thread['admin_unread'] ?? 0) + 1;
+  else $thread['user_unread'] = (int)($thread['user_unread'] ?? 0) + 1;
 
   $data['threads'][$userId] = $thread;
   chats_save($data);
@@ -154,6 +188,7 @@ function chat_threads_list(): array {
   foreach ($threads as $uid => $t) {
     if (!is_array($t)) continue;
     $t['user_id'] = (string)($t['user_id'] ?? $uid);
+    if (!isset($t['meta']) || !is_array($t['meta'])) $t['meta'] = [];
     $out[] = $t;
   }
 
@@ -166,8 +201,6 @@ function chat_threads_list(): array {
 
 function chat_admin_unread_total(): int {
   $sum = 0;
-  foreach (chat_threads_list() as $t) {
-    $sum += (int)($t['admin_unread'] ?? 0);
-  }
+  foreach (chat_threads_list() as $t) $sum += (int)($t['admin_unread'] ?? 0);
   return $sum;
 }

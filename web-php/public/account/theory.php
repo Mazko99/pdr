@@ -360,5 +360,6 @@ $isDone = theory_is_done($uid, $topic);
         </div>
     </div>
 </div>
+<?php require_once __DIR__ . '/../partials/chat_widget.php'; ?>
 </body>
 </html>

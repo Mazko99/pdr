@@ -4,6 +4,10 @@ declare(strict_types=1);
 require_once __DIR__ . '/../../src/bootstrap.php';
 require_once __DIR__ . '/../../src/users_store.php';
 
+if (session_status() !== PHP_SESSION_ACTIVE) {
+  session_start();
+}
+
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
   http_response_code(405);
   exit('Method not allowed');
@@ -37,7 +41,13 @@ if ($mode === 'register') {
   $hash = password_hash($pass, PASSWORD_DEFAULT);
   $uid = user_create($email, $name, $hash);
 
-  auth_login($uid);
+  auth_login((string)$uid);
+
+  // ✅ ДОДАНО: реєстрація сеансу (щоб відображалось в "Активні сеанси")
+  if (function_exists('session_register_current')) {
+    session_register_current((string)$uid, 'Email register');
+  }
+
   // опційно: одразу підрахувати доступ
   auth_refresh_access();
 
@@ -59,6 +69,12 @@ if (!user_verify_password($user, $pass)) {
 }
 
 auth_login((string)$user['id']);
+
+// ✅ ДОДАНО: реєстрація сеансу
+if (function_exists('session_register_current')) {
+  session_register_current((string)$user['id'], 'Email login');
+}
+
 auth_refresh_access();
 
 redirect('/account/index.php');

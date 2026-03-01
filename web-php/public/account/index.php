@@ -31,14 +31,6 @@ if (!$uid) {
 }
 $uidStr = (string)$uid;
 
-// ✅ sessions: enforce revoke + register current device session
-if (function_exists('session_enforce_not_revoked')) {
-  session_enforce_not_revoked($uidStr);
-}
-if (function_exists('session_register_current')) {
-  session_register_current($uidStr);
-}
-
 // ---- user ----
 $user = function_exists('user_find_by_id') ? user_find_by_id($uidStr) : null;
 
@@ -54,8 +46,13 @@ if ($nameFirst !== '') {
 }
 
 $tab = (string)($_GET['tab'] ?? 'dashboard');
-$allowedTabs = ['dashboard', 'subscriptions', 'tests', 'exam', 'trainer'];
+$allowedTabs = ['dashboard', 'subscriptions', 'tests', 'exam', 'trainer', 'security']; // ✅ ДОДАНО security
 if (!in_array($tab, $allowedTabs, true)) $tab = 'dashboard';
+
+// ✅ flash messages (для security_post.php)
+$flash_ok = (string)($_SESSION['flash_ok'] ?? '');
+$flash_err = (string)($_SESSION['flash_err'] ?? '');
+unset($_SESSION['flash_ok'], $_SESSION['flash_err']);
 
 // ---- Access ----
 $hasAccess = false;
@@ -64,73 +61,6 @@ if (is_array($user)) {
   if (!empty($user['subscription']) || !empty($user['subscription_until']) || !empty($user['expires_at'])) $hasAccess = true;
 }
 if (!empty($_SESSION['has_access'])) $hasAccess = true;
-
-// ✅ account actions: change password + sessions revoke
-function _account_redirect(string $url): void {
-  header('Location: ' . $url, true, 302);
-  exit;
-}
-
-$currentSid = session_id();
-if (!is_string($currentSid)) $currentSid = '';
-
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-  // CSRF (якщо є в bootstrap.php)
-  if (function_exists('csrf_verify')) {
-    csrf_verify($_POST['csrf'] ?? null);
-  }
-
-  $action = (string)($_POST['action'] ?? '');
-
-  if ($action === 'change_password') {
-    $old = (string)($_POST['old_password'] ?? '');
-    $new = (string)($_POST['new_password'] ?? '');
-    $new2 = (string)($_POST['new_password2'] ?? '');
-
-    $u = function_exists('user_find_by_id') ? user_find_by_id($uidStr) : null;
-    if (!is_array($u)) {
-      _account_redirect('/logout');
-    }
-
-    if ($new === '' || mb_strlen($new) < 6) {
-      _account_redirect('/account?tab=dashboard&err=pwd_short');
-    }
-    if ($new !== $new2) {
-      _account_redirect('/account?tab=dashboard&err=pwd_mismatch');
-    }
-    if (!password_verify($old, (string)($u['password_hash'] ?? ''))) {
-      _account_redirect('/account?tab=dashboard&err=pwd_old');
-    }
-
-    if (!function_exists('user_update')) {
-      _account_redirect('/account?tab=dashboard&err=pwd_fail');
-    }
-
-    user_update($uidStr, ['password_hash' => password_hash($new, PASSWORD_DEFAULT)]);
-
-    // після зміни пароля — скидаємо всі інші сесії
-    if (function_exists('sessions_revoke_all_for_user')) {
-      sessions_revoke_all_for_user($uidStr, $currentSid !== '' ? $currentSid : null);
-    }
-
-    _account_redirect('/account?tab=dashboard&ok=pwd');
-  }
-
-  if ($action === 'revoke_session') {
-    $sid = (string)($_POST['sid'] ?? '');
-    if ($sid !== '' && $sid !== $currentSid && function_exists('session_revoke_for_user')) {
-      session_revoke_for_user($uidStr, $sid);
-    }
-    _account_redirect('/account?tab=dashboard&ok=sessions');
-  }
-
-  if ($action === 'revoke_all_other') {
-    if (function_exists('sessions_revoke_all_for_user')) {
-      sessions_revoke_all_for_user($uidStr, $currentSid !== '' ? $currentSid : null);
-    }
-    _account_redirect('/account?tab=dashboard&ok=sessions');
-  }
-}
 
 // ---- Заглушка підписок ----
 $subscription = [
@@ -208,6 +138,7 @@ foreach ($passedTestIds as $tid) {
 }
 
 $coveredQuestions = count($coveredSet);
+
 $progressPercent = 0;
 if ($totalQuestions > 0) {
   $progressPercent = (int)round(($coveredQuestions / $totalQuestions) * 100);
@@ -219,6 +150,11 @@ $passedTestsCount = 0;
 foreach ($passedTestIds as $tid) {
   if (isset($allTests[$tid])) $passedTestsCount++;
 }
+
+// ✅ Security: sessions list
+$csrf = function_exists('csrf_token') ? csrf_token() : '';
+$currentSid = function_exists('session_current_id_safe') ? session_current_id_safe() : session_id();
+$sessions = function_exists('sessions_list_for_user') ? sessions_list_for_user($uidStr) : [];
 ?>
 <!doctype html>
 <html lang="uk">
@@ -229,64 +165,283 @@ foreach ($passedTestIds as $tid) {
 
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@400;600;700;800;900&family=Manrope:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=Unbounded:wght@500;700&display=swap" rel="stylesheet">
 
-  <link rel="stylesheet" href="/assets/css/style.css?v=8" />
+  <link rel="stylesheet" href="/assets/css/style.css?v=4" />
+
   <style>
-  .note{border-radius:14px; padding:12px 14px; font-weight:800;}
-  .note--ok{background:rgba(10,122,61,.10); border:1px solid rgba(10,122,61,.25); color:#0b1b14;}
-  .note--bad{background:rgba(220,38,38,.10); border:1px solid rgba(220,38,38,.25); color:#0b1b14;}
-  .label{font-weight:900;}
+    .study-card{position:relative;}
+    .study-card.is-locked{opacity:.92;}
+    .study-card__lock{
+      position:absolute;top:12px;right:12px;width:32px;height:32px;border-radius:999px;
+      display:flex;align-items:center;justify-content:center;
+      background: rgba(12,32,22,.08);border:1px solid rgba(12,32,22,.10);
+      font-size:16px;line-height:1;pointer-events:none;user-select:none;
+    }
+
+    .dash-split{
+      display:grid;
+      gap:14px;
+      margin-top:14px;
+      grid-template-columns: 1fr;
+    }
+    @media (min-width: 900px){
+      .dash-split{grid-template-columns: 1fr 1fr;align-items:start;}
+    }
+
+    /* TOP: 2 колонки */
+    .dash-top{
+      display:grid;
+      grid-template-columns: 1fr;
+      gap:16px;
+      align-items:start;
+      margin-bottom: 28px;
+    }
+    @media (min-width: 1100px){
+      .dash-top{
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        gap:22px;
+        align-items:start;
+      }
+      .dash-right{position:static;top:auto;}
+    }
+
+    /* Тариф */
+    .pricing.pricing--account{display:block;width:100%;}
+    .pricing.pricing--account .plan{width:100%;max-width:none;}
+
+    /* ✅ ШАПКА справа (ти виставив позиціювання — залишив як є) */
+    .dash-right-head{
+      margin:0 0 12px;
+      height: 54px;
+    }
+    @media (max-width:1099px){
+      .dash-right-head{display:none;}
+    }
+
+    /* ===========================
+       ✅ ПРОГРЕС (ЗБІЛЬШЕНО ЯК ТИ ПРОСИВ)
+       =========================== */
+    .progress-card{
+      background:#fff;
+      border-radius:18px;
+      padding:30px;
+      box-shadow:0 8px 30px rgba(0,0,0,0.06);
+      border:1px solid rgba(12,32,22,.06);
+      width:90%;
+      overflow:hidden;
+      display:flex;
+      flex-direction:column;
+    }
+
+    /* Заголовок більший */
+    .progress-title{
+      font-weight:900;
+      font-size:22px;
+      margin:0 0 14px;
+      text-align:center;
+      letter-spacing:.2px;
+    }
+
+    /* Кільце більше */
+    .ring-wrap{
+      display:flex;
+      justify-content:center;
+      align-items:center;
+      margin-top:6px;
+      margin-bottom:16px;
+      flex:0 0 auto;
+    }
+    .ring{width:190px;height:190px;display:block;}
+    .ring-bg{fill:none;stroke: rgba(11,27,20,.10);stroke-width: 14;}
+    .ring-fill{
+      fill:none;stroke:#22c55e;stroke-width:14;stroke-linecap:round;
+      transform: rotate(-90deg);
+      transform-origin: 50% 50%;
+      stroke-dasharray: 439.82;
+      stroke-dashoffset: 439.82;
+      transition: stroke-dashoffset .9s ease;
+    }
+    .ring-box{
+      position:relative;
+      width:190px;height:190px;
+      display:flex;align-items:center;justify-content:center;
+    }
+    .ring-center{position:absolute;text-align:center;transform: translateY(-2px);}
+    .ring-percent{font-size:36px;font-weight:900;color:#0a7a3d;line-height:1;}
+    .ring-sub{font-weight:800;opacity:.7;font-size:13px;margin-top:8px;}
+
+    /* Квадратики більші + текст "нижче" */
+    .stats-grid{
+      display:grid;
+      grid-template-columns: 1fr 1fr;
+      gap:14px;
+      margin-top:6px;
+      flex:1 1 auto;
+      align-content:start;
+      max-width: 360px;
+      margin-left:auto;
+      margin-right:auto;
+    }
+    .stat{
+      border:1px solid rgba(12,32,22,.08);
+      background: rgba(11,27,20,.02);
+      border-radius:16px;
+      padding:14px 12px;
+      min-height: 118px;
+      display:flex;
+      flex-direction:column;
+      justify-content:space-between; /* ✅ це дає "текст внизу" */
+      align-items:center;
+      text-align:center;
+    }
+    .stat-val{
+      font-weight:900;
+      font-size:20px;
+      margin-top:6px;
+      line-height:1.05;
+    }
+    .stat-lbl{
+      font-weight:800;
+      opacity:.7;
+      font-size:13px;
+      margin-bottom:6px;
+      line-height:1.1;
+    }
+
+    /* Кнопки (залишив в ряд як у тебе, трохи більші) */
+    .progress-actions{
+      margin-top:18px;
+      display:flex;
+      gap:14px;
+      align-items:center;
+      justify-content:space-between;
+      flex:0 0 auto;
+    }
+    .progress-actions .btn{
+      flex:1 1 0;
+      width:auto;
+      justify-content:center;
+      text-align:center;
+      padding: 16px 18px;
+      font-size: 16px;
+      border-radius: 999px;
+    }
+
+    @media (max-width: 560px){
+      .progress-actions{flex-direction:column;}
+      .progress-actions .btn{width:100%;}
+      .progress-card{width:100%;}
+      .stats-grid{max-width: 100%;}
+    }
+
+    /* ✅ Security UI */
+    .sec-grid{display:grid;gap:14px;margin-top:14px;grid-template-columns:1fr;}
+    @media (min-width: 900px){.sec-grid{grid-template-columns:1fr 1fr;align-items:start;}}
+    .sec-form .field{margin-bottom:12px;}
+    .sec-help{color:rgba(11,27,20,.70);font-weight:650;line-height:1.45;margin-top:6px;}
+    .session-item{
+      display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;
+      border:1px solid rgba(11,27,20,.10);border-radius:16px;padding:12px 12px;background:#fff;
+    }
+    .session-meta{min-width:260px;}
+    .session-title{font-weight:900;}
+    .session-sub{color:rgba(11,27,20,.68);font-weight:650;font-size:13px;line-height:1.35;margin-top:4px;word-break:break-word;}
+    .pill{
+      display:inline-flex;align-items:center;gap:8px;
+      padding:6px 10px;border-radius:999px;
+      border:1px solid rgba(11,27,20,.12);
+      background: rgba(11,27,20,.03);
+      font-weight:800;font-size:13px;
+    }
   </style>
 </head>
 
-<body class="page-account">
+<body>
 
-<header class="site-header">
-  <div class="container header-inner">
-    <a class="brand" href="/" aria-label="ProstoPDR">
-      <img class="brand__logo" src="/assets/img/logo.svg" alt="" />
+<header class="header">
+  <div class="container header__inner">
+    <a class="brand" href="/" aria-label="На головну">
+      <img class="brand__logo" src="/assets/img/logo.svg" alt="ProstoPDR" />
     </a>
 
-    <nav class="nav">
-      <a href="/#structure">структура</a>
-      <a href="/#pricing">тарифи</a>
-      <a href="/#program">програма</a>
-      <a href="/#faq">faq</a>
-    </nav>
-
-    <div class="usermenu">
-      <button class="usermenu__btn" type="button" id="userMenuBtn">
-        <span class="usermenu__avatar">🎓</span>
-        <span class="usermenu__name"><?= h($nameFirst) ?></span>
-        <span class="usermenu__chev">▾</span>
+    <div class="header__actions">
+      <button class="userpill" type="button" data-user-menu-btn aria-label="Профіль">
+        <span class="userpill__avatar">🎓</span>
+        <span class="userpill__meta">
+          <span class="userpill__name"><?= h($nameFirst) ?></span>
+          <span class="userpill__email"><?= h($email) ?></span>
+        </span>
+        <span class="userpill__chev">▾</span>
       </button>
 
-      <div class="usermenu__drop" id="userMenuDrop">
+      <div class="usermenu" data-user-menu>
+        <div class="usermenu__head">
+          <div class="usermenu__avatar">🎓</div>
+          <div class="usermenu__text">
+            <div class="usermenu__name"><?= h($nameRaw) ?></div>
+            <div class="usermenu__email"><?= h($email) ?></div>
+          </div>
+        </div>
+
         <a class="usermenu__item" href="/account"><span class="usermenu__icon">👤</span> Кабінет</a>
-        <a class="usermenu__item" href="#"><span class="usermenu__icon">🧑‍</span> Викладач</a>
+        <a class="usermenu__item" href="/account?tab=security"><span class="usermenu__icon">🔒</span> Безпека</a> <!-- ✅ ДОДАНО -->
         <a class="usermenu__item" href="/account?tab=subscriptions"><span class="usermenu__icon">💳</span> Мої підписки</a>
         <a class="usermenu__item" href="/"><span class="usermenu__icon">🏠</span> На головну</a>
         <a class="usermenu__item usermenu__item--danger" href="/logout"><span class="usermenu__icon">↩</span> Вийти</a>
       </div>
+
+      <button class="burger" type="button" aria-label="Меню" data-burger>
+        <span></span><span></span><span></span>
+      </button>
+    </div>
+  </div>
+
+  <div class="mobile" data-mobile>
+    <div class="mobile__top">
+      <div class="mobile__title">Меню</div>
+      <button class="mobile__close" type="button" aria-label="Закрити" data-mobile-close>✕</button>
+    </div>
+
+    <div class="mobile__inner">
+      <a class="mobile__link" href="/account">Кабінет</a>
+      <a class="mobile__link" href="/account?tab=security">Безпека</a> <!-- ✅ ДОДАНО -->
+      <a class="mobile__link" href="/account?tab=subscriptions">Мої підписки</a>
+      <a class="mobile__link" href="/account/tests.php">Тести</a>
+      <a class="mobile__link" href="/account/tests.php?mode=exam">Іспит</a>
+      <a class="mobile__link" href="/account/tests.php?mode=trainer">Тренажер</a>
+      <a class="mobile__link" href="/">На головну</a>
+
+      <div class="mobile__divider"></div>
+
+      <a class="btn btn--primary mobile__btn" href="/logout">Вийти</a>
     </div>
   </div>
 </header>
 
-<main class="account-main">
+<main class="section section--soft" style="padding-top:46px;">
   <div class="container">
+    <h2 class="h2">Кабінет</h2>
+    <p class="lead"></p>
 
-    <div class="account-head">
-      <h1 class="h1">Кабінет</h1>
-      <p class="lead">Керуйте навчанням, підпискою та прогресом.</p>
-    </div>
+    <?php if ($flash_err !== ''): ?>
+      <div class="sub-card" style="border-color: rgba(255,70,70,.22); background: rgba(255,70,70,.06); font-weight: 850;">
+        <?= h($flash_err) ?>
+      </div>
+    <?php endif; ?>
+    <?php if ($flash_ok !== ''): ?>
+      <div class="sub-card" style="border-color: rgba(22,163,74,.22); background: rgba(22,163,74,.08); font-weight: 850;">
+        <?= h($flash_ok) ?>
+      </div>
+    <?php endif; ?>
 
     <div class="account-tabs">
-      <a class="account-tab <?= $tab==='dashboard'?'is-active':''; ?>" href="/account">Кабінет</a>
+      <a class="account-tab <?= $tab==='dashboard'?'is-active':''; ?>" href="/account?tab=dashboard">Кабінет</a>
       <a class="account-tab <?= $tab==='subscriptions'?'is-active':''; ?>" href="/account?tab=subscriptions">Мої підписки</a>
-      <a class="account-tab <?= $tab==='tests'?'is-active':''; ?>" href="/account/tests.php?mode=tests">Тести</a>
+      <a class="account-tab <?= $tab==='tests'?'is-active':''; ?>" href="/account/tests.php">Тести</a>
       <a class="account-tab <?= $tab==='exam'?'is-active':''; ?>" href="/account/tests.php?mode=exam">Іспит</a>
       <a class="account-tab <?= $tab==='trainer'?'is-active':''; ?>" href="/account/tests.php?mode=trainer">Тренажер</a>
+      <a class="account-tab <?= $tab==='security'?'is-active':''; ?>" href="/account?tab=security">Безпека</a> <!-- ✅ ДОДАНО -->
     </div>
 
     <?php if ($tab === 'dashboard'): ?>
@@ -298,41 +453,65 @@ foreach ($passedTestIds as $tid) {
           <div class="account-block" id="pricing">
             <h3 class="h3">Обрати тариф</h3>
 
-            <div class="plans">
-              <article class="plan plan--primary" id="planCard">
-                <div class="plan__top">
-                  <div class="plan__badge">Базовий план</div>
-                  <h2 class="plan__title">Базовий план<br/>підписка</h2>
-                  <div class="plan__price">49₴ <span>/ 30 днів</span></div>
+            <div class="pricing pricing--account">
+
+              <!-- ✅ 699/міс -->
+              <article class="plan plan--basic" id="planCard">
+                <h3 class="plan__title">Базовий план<br/>підписка</h3>
+                <p class="plan__desc">
+                  Доступ до тестів ПДР, режиму «іспит», пояснень та статистики. Підписку можна скасувати у будь-який момент.
+                </p>
+
+                <div class="plan__price">
+                  <span class="plan__amount">699,00 грн</span><span class="plan__period">/міс</span>
+                </div>
+
+                <div class="plan__banner">
+                  <span class="dot dot--ok">✓</span>
+                  Підписка поновлюється автоматично та діє до кінця оплаченого періоду. Доступ одразу після оплати.
                 </div>
 
                 <ul class="plan__list">
-                  <li>Доступ до всіх тестів</li>
-                  <li>Режим «іспит»</li>
-                  <li>Пояснення до відповідей</li>
-                  <li>Статистика прогресу</li>
+                  <li>Тести ПДР з поясненнями</li>
+                  <li>Режим «іспит» з таймером</li>
+                  <li>Повторення помилок та «слабкі теми»</li>
+                  <li>Статистика прогресу по днях</li>
+                  <li>Доступ з телефону/ПК у будь-який час</li>
+                  <li>Нотатки до питань та тем</li>
                 </ul>
 
-                <div class="plan__cta-wrap">
+                <div class="plan__cta-row">
+                  <a class="btn btn--ghost plan__cta" href="/demo">Отримати 3 дні безкоштовно</a>
                   <a class="btn btn--primary plan__cta" href="/checkout?plan=basic">Обрати</a>
                 </div>
               </article>
 
-              <article class="plan plan--ghost">
-                <div class="plan__top">
-                  <div class="plan__badge">Тестовий доступ</div>
-                  <h2 class="plan__title">План на 12 днів</h2>
-                  <div class="plan__price">29₴ <span>/ 12 днів</span></div>
+              <!-- ✅ ДОДАНО: 349/12 днів (такий самий стиль кнопок) -->
+              <article class="plan plan--personal">
+                <h3 class="plan__title">План на 12 днів</h3>
+                <p class="plan__desc">
+                  Доступ до тестів ПДР, режиму «іспит», пояснень та статистики. Підписку можна скасувати у будь-який момент.
+                </p>
+
+                <div class="plan__price">
+                  <span class="plan__amount">389,99 грн</span><span class="plan__period">/12 днів</span>
+                </div>
+
+                <div class="plan__banner">
+                  <span class="dot dot--ok">✓</span>
+                  Доступ діє 12 днів з моменту оплати. Активується одразу після оплати.
                 </div>
 
                 <ul class="plan__list">
-                  <li>Доступ до тестів</li>
-                  <li>Пояснення</li>
-                  <li>Прогрес</li>
-                  <li>Підготовка до іспиту</li>
+                  <li>Тести ПДР з поясненнями</li>
+                  <li>Режим «іспит» з таймером</li>
+                  <li>Повторення помилок та «слабкі теми»</li>
+                  <li>Статистика прогресу по днях</li>
+                  <li>Доступ з телефону/ПК у будь-який час</li>
+                  <li>Нотатки до питань та тем</li>
                 </ul>
 
-                <div class="plan__cta-wrap">
+                <div class="plan__cta-row">
                   <a class="btn btn--ghost plan__cta" href="/demo">Отримати 3 дні безкоштовно</a>
                   <a class="btn btn--primary plan__cta" href="/checkout?plan=mini12">Обрати</a>
                 </div>
@@ -369,11 +548,11 @@ foreach ($passedTestIds as $tid) {
               </div>
               <div class="stat">
                 <div class="stat-val"><?= (int)$totalQuestions ?></div>
-                <div class="stat-lbl">Питань</div>
+                <div class="stat-lbl">Всього питань</div>
               </div>
               <div class="stat">
-                <div class="stat-val"><?= (int)$passedTestsCount ?></div>
-                <div class="stat-lbl">Пройдено тестів</div>
+                <div class="stat-val"><?= (int)$passedTestsCount ?> / <?= (int)$totalTests ?></div>
+                <div class="stat-lbl">Тести пройдено</div>
               </div>
               <div class="stat">
                 <div class="stat-val"><?= (int)$mistakesCount ?></div>
@@ -381,7 +560,6 @@ foreach ($passedTestIds as $tid) {
               </div>
             </div>
 
-         
           </div>
         </aside>
 
@@ -396,53 +574,69 @@ foreach ($passedTestIds as $tid) {
             <?php if (!$hasAccess): ?><div class="study-card__lock" title="Доступ закрито">🔒</div><?php endif; ?>
             <div class="study-card__title" style="font-weight:900;margin-bottom:6px;">Тести</div>
             <div style="color:rgba(11,27,20,.65);font-weight:700;line-height:1.4;">
-              Тренуйся по темах та змішаних тестах.
+              Питання по темах • пояснення
             </div>
-            <div style="margin-top:12px;">
-              <a class="btn btn--primary" href="<?= $hasAccess ? '/account/tests.php?mode=tests' : '/account?tab=dashboard#pricing'; ?>">Перейти</a>
-            </div>
+            <div style="height:10px"></div>
+            <?php if ($hasAccess): ?>
+              <a class="btn btn--ghost" href="/account/tests.php">Відкрити →</a>
+            <?php else: ?>
+              <span style="color:rgba(11,27,20,.55);font-weight:800;">Відкрити →</span>
+            <?php endif; ?>
           </div>
 
           <div class="sub-card study-card <?= !$hasAccess ? 'is-locked' : ''; ?>" style="background:#fff;">
             <?php if (!$hasAccess): ?><div class="study-card__lock" title="Доступ закрито">🔒</div><?php endif; ?>
             <div class="study-card__title" style="font-weight:900;margin-bottom:6px;">Іспит</div>
             <div style="color:rgba(11,27,20,.65);font-weight:700;line-height:1.4;">
-              Режим іспиту з таймером та лімітом помилок.
+              Таймер • ліміт помилок • 1 спроба
             </div>
-            <div style="margin-top:12px;">
-              <a class="btn btn--primary" href="<?= $hasAccess ? '/account/tests.php?mode=exam' : '/account?tab=dashboard#pricing'; ?>">Перейти</a>
-            </div>
+            <div style="height:10px"></div>
+            <?php if ($hasAccess): ?>
+              <a class="btn btn--ghost" href="/account/tests.php?mode=exam">Почати →</a>
+            <?php else: ?>
+              <span style="color:rgba(11,27,20,.55);font-weight:800;">Почати →</span>
+            <?php endif; ?>
           </div>
 
           <div class="sub-card study-card <?= !$hasAccess ? 'is-locked' : ''; ?>" style="background:#fff;">
             <?php if (!$hasAccess): ?><div class="study-card__lock" title="Доступ закрито">🔒</div><?php endif; ?>
             <div class="study-card__title" style="font-weight:900;margin-bottom:6px;">Тренажер</div>
             <div style="color:rgba(11,27,20,.65);font-weight:700;line-height:1.4;">
-              Випадкові питання, повтор помилок та прогрес.
+              Повтор помилок • мікс питань
             </div>
-            <div style="margin-top:12px;">
-              <a class="btn btn--primary" href="<?= $hasAccess ? '/account/tests.php?mode=trainer' : '/account?tab=dashboard#pricing'; ?>">Перейти</a>
-            </div>
+            <div style="height:10px"></div>
+            <?php if ($hasAccess): ?>
+              <a class="btn btn--ghost" href="/account/tests.php?mode=trainer">Тренуватись →</a>
+            <?php else: ?>
+              <span style="color:rgba(11,27,20,.55);font-weight:800;">Тренуватись →</span>
+            <?php endif; ?>
           </div>
         </div>
-      </div>
 
-      <div class="account-grid">
-        <div class="account-card">
+        <?php if (!$hasAccess): ?>
+          <div class="sub-card" style="margin-top:14px;">
+            <b>Щоб відкрити тести/іспит/тренажер — обери тариф вище.</b>
+          </div>
+        <?php endif; ?>
+
+        <div class="dash-split">
 
           <div class="account-card">
             <h3 class="h3">Працювати над помилками</h3>
-            <div class="lead" style="margin-top:8px;">
-              У вас <b><?= (int)$mistakesCount ?></b> унікальних помилок.
+            <p class="lead">
+              Зібрані помилки з усіх тестів: <b><?= (int)$mistakesCount; ?></b>
+            </p>
+            <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:12px;">
+              <a class="btn btn--primary" href="<?= $hasAccess ? '/account/tests.php?mode=trainer&mistakes=1' : '/account?tab=dashboard#pricing'; ?>">
+                Повтор помилок →
+              </a>
+              <a class="btn btn--ghost" href="<?= $hasAccess ? '/account/tests.php' : '/account?tab=dashboard#pricing'; ?>">
+                До тестів
+              </a>
             </div>
-
             <?php if ($mistakesCount === 0): ?>
-              <div class="lead" style="margin-top:10px;">
-                Помилок ще немає — проходьте тести, і тут з’явиться повтор.
-              </div>
-            <?php else: ?>
-              <div style="margin-top:12px;">
-                <a class="btn btn--primary" href="<?= $hasAccess ? '/account/tests.php?mode=trainer&mistakes=1' : '/account?tab=dashboard#pricing'; ?>">Повторити помилки</a>
+              <div class="lock-note" style="margin-top:12px;">
+                Поки що помилок немає. Вони з’являться після проходження тестів (коли відповіси неправильно).
               </div>
             <?php endif; ?>
           </div>
@@ -459,105 +653,110 @@ foreach ($passedTestIds as $tid) {
 
       </div>
 
-          <div class="account-card">
-            <h3 class="h3">Безпека</h3>
+    <?php elseif ($tab === 'security'): ?>
 
-            <?php if (!empty($_GET['ok']) && $_GET['ok']==='pwd'): ?>
-              <div class="note note--ok" style="margin-top:10px;">✅ Пароль змінено. Інші сеанси завершені.</div>
-            <?php endif; ?>
-            <?php if (!empty($_GET['ok']) && $_GET['ok']==='sessions'): ?>
-              <div class="note note--ok" style="margin-top:10px;">✅ Сеанси оновлено.</div>
-            <?php endif; ?>
+      <!-- ✅ SECURITY TAB -->
+      <div class="account-grid">
+        <div class="account-card sec-form">
+          <h3 class="h3">Зміна пароля</h3>
+          <p class="sec-help">Рекомендується змінити пароль, якщо ви підозрюєте вхід з іншого пристрою.</p>
 
-            <?php if (!empty($_GET['err'])): ?>
-              <div class="note note--bad" style="margin-top:10px;">
+          <form method="post" action="/account/security_post.php">
+            <input type="hidden" name="csrf" value="<?= h($csrf) ?>">
+            <input type="hidden" name="action" value="change_password">
+
+            <div class="field">
+              <div class="label">Поточний пароль</div>
+              <input class="input" type="password" name="current_password" autocomplete="current-password" required>
+            </div>
+
+            <div class="field">
+              <div class="label">Новий пароль</div>
+              <input class="input" type="password" name="new_password" autocomplete="new-password" required placeholder="Мінімум 8 символів">
+            </div>
+
+            <div class="field">
+              <div class="label">Повтори новий пароль</div>
+              <input class="input" type="password" name="new_password_confirm" autocomplete="new-password" required>
+            </div>
+
+            <label class="pill" style="margin-top:8px;">
+              <input type="checkbox" name="revoke_others" value="1" checked>
+              Вийти з інших пристроїв після зміни
+            </label>
+
+            <div style="margin-top:12px;display:flex;gap:10px;flex-wrap:wrap;">
+              <button class="btn btn--primary" type="submit">Змінити пароль</button>
+            </div>
+          </form>
+        </div>
+
+        <div class="account-card">
+          <h3 class="h3">Активні сеанси</h3>
+          <p class="sec-help">Тут показані пристрої, де ви зараз авторизовані. Можна завершити будь-який сеанс.</p>
+
+          <form method="post" action="/account/security_post.php" style="margin-top:10px;">
+            <input type="hidden" name="csrf" value="<?= h($csrf) ?>">
+            <input type="hidden" name="action" value="revoke_all">
+            <label class="pill">
+              <input type="checkbox" name="keep_current" value="1" checked>
+              Залишити цей пристрій
+            </label>
+            <div style="margin-top:12px;">
+              <button class="btn btn--ghost" type="submit">Вийти з усіх інших пристроїв</button>
+            </div>
+          </form>
+
+          <div style="height:12px"></div>
+
+          <?php if (!is_array($sessions) || count($sessions) === 0): ?>
+            <div class="sub-card" style="margin-top:10px;">
+              Немає збережених сеансів. (Перевір, чи викликається <b>session_register_current()</b> при логіні.)
+            </div>
+          <?php else: ?>
+            <div style="display:grid;gap:10px;margin-top:10px;">
+              <?php foreach ($sessions as $s): ?>
                 <?php
-                  $e = (string)$_GET['err'];
-                  $msg = 'Помилка.';
-                  if ($e === 'pwd_short') $msg = 'Новий пароль має бути мінімум 6 символів.';
-                  elseif ($e === 'pwd_mismatch') $msg = 'Паролі не співпадають.';
-                  elseif ($e === 'pwd_old') $msg = 'Старий пароль невірний.';
-                  elseif ($e === 'pwd_fail') $msg = 'Не вдалося змінити пароль.';
-                  echo h($msg);
+                  $sid = (string)($s['sid'] ?? '');
+                  $isCurrent = ($sid !== '' && $sid === (string)$currentSid);
+                  $ip = (string)($s['ip'] ?? '');
+                  $ua = (string)($s['ua'] ?? '');
+                  $created = (string)($s['created_at'] ?? '');
+                  $seen = (string)($s['last_seen'] ?? '');
                 ?>
-              </div>
-            <?php endif; ?>
-
-            <div class="sub-card" style="margin-top:12px;">
-              <div class="sub-card__row">
-                <div class="sub-card__label">Ваш ID</div>
-                <div class="sub-card__value"><b><?= h((string)$uidStr) ?></b></div>
-              </div>
-            </div>
-
-            <div style="margin-top:14px;">
-              <div style="font-weight:900; margin-bottom:8px;">Змінити пароль</div>
-
-              <form method="post" class="form" style="display:grid; gap:10px; max-width:520px;">
-                <input type="hidden" name="csrf" value="<?= h(function_exists('csrf_token') ? (string)csrf_token() : '') ?>">
-                <input type="hidden" name="action" value="change_password">
-
-                <label class="label">Старий пароль</label>
-                <input class="input" type="password" name="old_password" required>
-
-                <label class="label">Новий пароль</label>
-                <input class="input" type="password" name="new_password" required>
-
-                <label class="label">Повторіть новий пароль</label>
-                <input class="input" type="password" name="new_password2" required>
-
-                <button class="btn btn--primary" type="submit">Змінити пароль</button>
-              </form>
-
-              <form method="post" style="margin-top:10px;">
-                <input type="hidden" name="csrf" value="<?= h(function_exists('csrf_token') ? (string)csrf_token() : '') ?>">
-                <input type="hidden" name="action" value="revoke_all_other">
-                <button class="btn btn--ghost" type="submit">Вийти з усіх інших пристроїв</button>
-              </form>
-            </div>
-
-            <div style="margin-top:14px;">
-              <div style="font-weight:900; margin-bottom:8px;">Активні сеанси</div>
-
-              <?php $sessions = function_exists('sessions_list_for_user') ? sessions_list_for_user($uidStr) : []; ?>
-              <?php if (empty($sessions)): ?>
-                <div class="lead">Немає активних сесій.</div>
-              <?php else: ?>
-                <div style="display:grid; gap:10px;">
-                  <?php foreach ($sessions as $s):
-                    $sid = (string)($s['sid'] ?? '');
-                    $isThis = ($sid !== '' && $sid === $currentSid);
-                  ?>
-                    <div class="sub-card" style="background:#fff;">
-                      <div class="sub-card__row">
-                        <div class="sub-card__label"><?= $isThis ? 'Цей пристрій ✅' : 'Пристрій' ?></div>
-                        <div class="sub-card__value" style="opacity:.75; font-weight:800; font-size:13px;">
-                          IP: <?= h((string)($s['ip'] ?? '')) ?><br>
-                          UA: <?= h((string)($s['ua'] ?? '')) ?><br>
-                          Створено: <?= h((string)($s['created_at'] ?? '')) ?><br>
-                          Остання активність: <?= h((string)($s['last_seen'] ?? '')) ?>
-                        </div>
-                      </div>
-
-                      <?php if (!$isThis): ?>
-                        <div style="padding:0 14px 14px 14px;">
-                          <form method="post">
-                            <input type="hidden" name="csrf" value="<?= h(function_exists('csrf_token') ? (string)csrf_token() : '') ?>">
-                            <input type="hidden" name="action" value="revoke_session">
-                            <input type="hidden" name="sid" value="<?= h($sid) ?>">
-                            <button class="btn btn--ghost" type="submit">Завершити сеанс</button>
-                          </form>
-                        </div>
-                      <?php endif; ?>
+                <div class="session-item">
+                  <div class="session-meta">
+                    <div class="session-title">
+                      <?= $isCurrent ? '✅ Поточний пристрій' : 'Пристрій' ?>
+                      <?php if ($ip !== ''): ?><span class="pill" style="margin-left:8px;">IP: <?= h($ip) ?></span><?php endif; ?>
                     </div>
-                  <?php endforeach; ?>
+                    <div class="session-sub">
+                      <div><b>Остання активність:</b> <?= h($seen !== '' ? $seen : '—') ?></div>
+                      <div><b>Створено:</b> <?= h($created !== '' ? $created : '—') ?></div>
+                      <div><b>UA:</b> <?= h($ua !== '' ? $ua : '—') ?></div>
+                      <div><b>SID:</b> <?= h($sid) ?></div>
+                    </div>
+                  </div>
+
+                  <div style="display:flex;gap:10px;align-items:center;">
+                    <?php if (!$isCurrent): ?>
+                      <form method="post" action="/account/security_post.php">
+                        <input type="hidden" name="csrf" value="<?= h($csrf) ?>">
+                        <input type="hidden" name="action" value="revoke_one">
+                        <input type="hidden" name="sid" value="<?= h($sid) ?>">
+                        <button class="btn btn--primary" type="submit">Завершити</button>
+                      </form>
+                    <?php else: ?>
+                      <span class="pill">Це ви</span>
+                    <?php endif; ?>
+                  </div>
                 </div>
-              <?php endif; ?>
+              <?php endforeach; ?>
             </div>
+          <?php endif; ?>
 
-          </div>
-
-
+        </div>
+      </div>
 
     <?php else: ?>
 
@@ -636,6 +835,6 @@ foreach ($passedTestIds as $tid) {
   }
 })();
 </script>
-
+<?php require_once __DIR__ . '/../partials/chat_widget.php'; ?>
 </body>
 </html>
