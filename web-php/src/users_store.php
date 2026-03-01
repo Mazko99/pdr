@@ -2,43 +2,21 @@
 declare(strict_types=1);
 
 /**
- * ProstoPDR users_store.php
+ * users_store.php
  *
- * Єдиний формат storage/users.json:
+ * storage/users.json:
  * {
- *   "users": [
- *     {
- *       "id":"1",
- *       "email":"...",
- *       "name":"...",
- *       "password_hash":"...",
- *       "plan":"free|basic|personal|dev|base|12d",
- *       "paid_at":null,
- *       "expires_at":null,
- *       "created_at":"2026-02-21T10:00:00+00:00"
- *     }
- *   ],
- *   "oauth": [
- *     {
- *       "provider":"google|apple",
- *       "sub":"provider_user_id",
- *       "user_id":"1",
- *       "email":"optional",
- *       "name":"optional",
- *       "linked_at":"2026-02-21T10:00:00+00:00"
- *     }
- *   ]
+ *   "users": [ {user}, ... ],
+ *   "oauth": [ {provider, sub, user_id, ...}, ... ]   // якщо використовується
  * }
+ *
+ * id — STRING (uuid/hex).
  */
 
 function users_store_path(): string {
   return dirname(__DIR__) . '/storage/users.json';
 }
 
-/**
- * Завжди повертає ['users' => [...], 'oauth' => [...]]
- * Підхоплює старі/криві формати (мапа, список, тощо), але нормалізує на save.
- */
 function users_load(): array {
   $path = users_store_path();
   if (!is_file($path)) return ['users' => [], 'oauth' => []];
@@ -49,22 +27,21 @@ function users_load(): array {
   $data = json_decode($raw, true);
   if (!is_array($data)) return ['users' => [], 'oauth' => []];
 
-  // Правильний формат (users + optional oauth)
+  // нормальний формат
   if (isset($data['users']) && is_array($data['users'])) {
-    $users = array_values(array_filter($data['users'], 'is_array'));
-    $oauth = [];
-    if (isset($data['oauth']) && is_array($data['oauth'])) {
-      $oauth = array_values(array_filter($data['oauth'], 'is_array'));
-    }
-    return ['users' => $users, 'oauth' => $oauth];
+    if (!isset($data['oauth']) || !is_array($data['oauth'])) $data['oauth'] = [];
+    return [
+      'users' => array_values(array_filter($data['users'], 'is_array')),
+      'oauth' => array_values(array_filter($data['oauth'], 'is_array')),
+    ];
   }
 
-  // Якщо напряму список користувачів
-  if (array_is_list($data) && (count($data) === 0 || is_array($data[0] ?? null))) {
+  // fallback: якщо раптом був list users
+  if (array_is_list($data) && (count($data) === 0 || is_array($data[0]))) {
     return ['users' => array_values(array_filter($data, 'is_array')), 'oauth' => []];
   }
 
-  // Якщо це мапа id => user
+  // fallback: map id => user
   $isMap = true;
   foreach ($data as $k => $v) {
     if (!is_string($k) && !is_int($k)) { $isMap = false; break; }
@@ -80,19 +57,14 @@ function users_load(): array {
 }
 
 /**
- * Атомарний запис, щоб users.json не ламався
+ * Атомарний запис
  */
 function users_save(array $store): void {
   $path = users_store_path();
 
-  if (!isset($store['users']) || !is_array($store['users'])) {
-    $store['users'] = [];
-  }
-  if (!isset($store['oauth']) || !is_array($store['oauth'])) {
-    $store['oauth'] = [];
-  }
+  if (!isset($store['users']) || !is_array($store['users'])) $store['users'] = [];
+  if (!isset($store['oauth']) || !is_array($store['oauth'])) $store['oauth'] = [];
 
-  // нормалізуємо users
   $outUsers = [];
   foreach ($store['users'] as $u) {
     if (!is_array($u)) continue;
@@ -101,42 +73,31 @@ function users_save(array $store): void {
     $outUsers[] = $nu;
   }
 
-  // нормалізуємо oauth
   $outOauth = [];
-  $seen = []; // provider|sub => true
+  $seen = [];
   foreach ($store['oauth'] as $row) {
     if (!is_array($row)) continue;
     $nr = oauth_normalize($row);
     if ($nr['provider'] === '' || $nr['sub'] === '' || $nr['user_id'] === '') continue;
-
     $key = $nr['provider'] . '|' . $nr['sub'];
     if (isset($seen[$key])) continue;
     $seen[$key] = true;
-
     $outOauth[] = $nr;
   }
 
   $dir = dirname($path);
-  if (!is_dir($dir)) {
-    @mkdir($dir, 0775, true);
-  }
+  if (!is_dir($dir)) @mkdir($dir, 0775, true);
 
   $json = json_encode(
     ['users' => array_values($outUsers), 'oauth' => array_values($outOauth)],
     JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT
   );
-  if ($json === false) {
-    throw new RuntimeException('users_save: json_encode failed');
-  }
+  if ($json === false) throw new RuntimeException('users_save: json_encode failed');
 
   $tmp = $path . '.tmp';
   $fp = fopen($tmp, 'wb');
   if (!$fp) throw new RuntimeException('users_save: cannot open tmp');
-
-  if (!flock($fp, LOCK_EX)) {
-    fclose($fp);
-    throw new RuntimeException('users_save: cannot lock tmp');
-  }
+  if (!flock($fp, LOCK_EX)) { fclose($fp); throw new RuntimeException('users_save: cannot lock tmp'); }
 
   fwrite($fp, $json);
   fflush($fp);
@@ -151,11 +112,10 @@ function users_all(): array {
   return $s['users'] ?? [];
 }
 
-/**
- * Працює з int або string id
- */
 function user_find_by_id(int|string $id): ?array {
   $sid = (string)$id;
+  if ($sid === '') return null;
+
   foreach (users_all() as $u) {
     if (!is_array($u)) continue;
     if ((string)($u['id'] ?? '') === $sid) return user_normalize($u);
@@ -163,11 +123,27 @@ function user_find_by_id(int|string $id): ?array {
   return null;
 }
 
-/**
- * Оновлює юзера по id. Якщо нема — створює.
- */
-function user_update(int|string $id, array $patch): array {
-  $sid = (string)$id;
+function user_find_by_email(string $email): ?array {
+  $email = strtolower(trim($email));
+  if ($email === '') return null;
+
+  foreach (users_all() as $u) {
+    if (!is_array($u)) continue;
+    $ue = strtolower(trim((string)($u['email'] ?? '')));
+    if ($ue !== '' && $ue === $email) return user_normalize($u);
+  }
+  return null;
+}
+
+function user_save(array $user): array {
+  $id = (string)($user['id'] ?? '');
+  if ($id === '') throw new InvalidArgumentException('user_save: empty id');
+  return user_update($id, $user);
+}
+
+function user_update(string $id, array $patch): array {
+  $id = (string)$id;
+  if ($id === '') throw new InvalidArgumentException('user_update: empty id');
 
   $store = users_load();
   $users = $store['users'] ?? [];
@@ -176,16 +152,16 @@ function user_update(int|string $id, array $patch): array {
   for ($i = 0; $i < count($users); $i++) {
     $u = $users[$i];
     if (!is_array($u)) continue;
-    if ((string)($u['id'] ?? '') !== $sid) continue;
+    if ((string)($u['id'] ?? '') !== $id) continue;
 
     $found = true;
-    $users[$i] = user_normalize(array_merge($u, $patch, ['id' => $sid]));
+    $users[$i] = user_normalize(array_merge($u, $patch, ['id' => $id]));
     break;
   }
 
   if (!$found) {
     $users[] = user_normalize(array_merge([
-      'id' => $sid,
+      'id' => $id,
       'email' => '',
       'name' => '',
       'password_hash' => '',
@@ -193,40 +169,23 @@ function user_update(int|string $id, array $patch): array {
       'paid_at' => null,
       'expires_at' => null,
       'created_at' => gmdate('c'),
-    ], $patch, ['id' => $sid]));
+    ], $patch, ['id' => $id]));
   }
 
   $store['users'] = array_values($users);
   users_save($store);
 
-  return user_find_by_id($sid) ?? user_normalize(['id' => $sid]);
+  return user_find_by_id($id) ?? user_normalize(['id' => $id]);
 }
 
 /**
- * Синонім (деінде в коді ти це використовуєш)
- */
-function user_save(array $user): array {
-  $id = (string)($user['id'] ?? '');
-  if ($id === '') throw new InvalidArgumentException('user_save: empty id');
-  return user_update($id, $user);
-}
-
-/**
- * ✅ Для твоїх pay-скриптів: вони викликають user_upsert($u)
- */
-function user_upsert(array $user): array {
-  return user_save($user);
-}
-
-/**
- * Доступ: dev завжди true; basic/personal/base/12d — якщо expires_at в майбутньому.
+ * ✅ Перевірка доступу по плану/експайру
+ * Під твої плани: free / base / 12d / personal / basic / dev
  */
 function user_has_access(array $user, ?int $nowTs = null): bool {
   $plan = strtolower((string)($user['plan'] ?? 'free'));
   if ($plan === 'dev') return true;
-
-  $allowed = ['basic', 'personal', 'base', '12d'];
-  if (!in_array($plan, $allowed, true)) return false;
+  if ($plan === 'free' || $plan === '' || $plan === 'none' || $plan === 'null') return false;
 
   $exp = $user['expires_at'] ?? null;
   if ($exp === null || $exp === '' || $exp === 'null') return true;
@@ -250,138 +209,68 @@ function user_normalize(array $u): array {
 
   $u['paid_at'] = $u['paid_at'] ?? null;
   $u['expires_at'] = $u['expires_at'] ?? null;
-
   $u['created_at'] = (string)($u['created_at'] ?? gmdate('c'));
 
   return $u;
 }
 
 /**
- * Ремонт users.json: нормалізує і перезаписує
+ * ✅ Оновити план + expires
+ * days = 0 -> безстроково
  */
-function users_repair_and_save(): void {
+function user_set_plan(string $userId, string $plan, int $days): bool {
+  $userId = (string)$userId;
+  if ($userId === '') return false;
+
   $store = users_load();
+  if (!isset($store['users']) || !is_array($store['users'])) $store['users'] = [];
+
+  $now = time();
+  $expires = ($days > 0) ? gmdate('c', $now + $days * 86400) : null;
+
+  $changed = false;
+  foreach ($store['users'] as &$u) {
+    if (!is_array($u)) continue;
+    if ((string)($u['id'] ?? '') !== $userId) continue;
+
+    $u['plan'] = $plan;
+    $u['paid_at'] = gmdate('c');
+    $u['expires_at'] = $expires;
+    $u['plan_set_at'] = gmdate('c');
+    $changed = true;
+    break;
+  }
+  unset($u);
+
+  if (!$changed) return false;
+
   users_save($store);
+  return true;
 }
 
 /* ============================================================
-   OAUTH (Google/Apple)
+   OAUTH (якщо у тебе використовується)
 ============================================================ */
 
-function oauth_normalize(array $row): array {
-  $provider = strtolower(trim((string)($row['provider'] ?? '')));
-  $sub = trim((string)($row['sub'] ?? ''));
-  $userId = trim((string)($row['user_id'] ?? ''));
-
-  $email = trim((string)($row['email'] ?? ''));
-  $name  = trim((string)($row['name'] ?? ''));
-
-  $linkedAt = (string)($row['linked_at'] ?? '');
-  if ($linkedAt === '') $linkedAt = gmdate('c');
-
+function oauth_normalize(array $r): array {
   return [
-    'provider' => $provider,
-    'sub' => $sub,
-    'user_id' => $userId,
-    'email' => $email,
-    'name' => $name,
-    'linked_at' => $linkedAt,
+    'provider' => (string)($r['provider'] ?? ''),
+    'sub' => (string)($r['sub'] ?? ''),
+    'user_id' => (string)($r['user_id'] ?? ''),
+    'email' => (string)($r['email'] ?? ''),
+    'name' => (string)($r['name'] ?? ''),
+    'linked_at' => (string)($r['linked_at'] ?? gmdate('c')),
   ];
 }
 
-function oauth_find(string $provider, string $sub): ?array {
-  $provider = strtolower(trim($provider));
-  $sub = trim($sub);
-  if ($provider === '' || $sub === '') return null;
-
-  $store = users_load();
-  $list = $store['oauth'] ?? [];
-  if (!is_array($list)) return null;
-
-  foreach ($list as $row) {
-    if (!is_array($row)) continue;
-    $r = oauth_normalize($row);
-    if ($r['provider'] === $provider && $r['sub'] === $sub) return $r;
-  }
-  return null;
-}
-
-function oauth_user_id_by_provider_sub(string $provider, string $sub): ?string {
-  $r = oauth_find($provider, $sub);
-  if (!$r) return null;
-  $uid = (string)($r['user_id'] ?? '');
-  return $uid !== '' ? $uid : null;
-}
-
-function oauth_find_by_email(string $provider, string $email): ?array {
-  $provider = strtolower(trim($provider));
-  $email = strtolower(trim($email));
-  if ($provider === '' || $email === '') return null;
-
-  $store = users_load();
-  $list = $store['oauth'] ?? [];
-  if (!is_array($list)) return null;
-
-  foreach ($list as $row) {
-    if (!is_array($row)) continue;
-    $r = oauth_normalize($row);
-    if ($r['provider'] !== $provider) continue;
-    if (strtolower($r['email'] ?? '') === $email) return $r;
-  }
-  return null;
-}
-
-function oauth_link(string $provider, string $sub, string $userId, string $email = '', string $name = ''): array {
-  $provider = strtolower(trim($provider));
-  $sub = trim($sub);
-  $userId = trim($userId);
-  $email = trim($email);
-  $name = trim($name);
-
-  if ($provider === '' || $sub === '' || $userId === '') {
-    throw new InvalidArgumentException('oauth_link: provider/sub/userId required');
-  }
-
-  $store = users_load();
-  $list = $store['oauth'] ?? [];
-  if (!is_array($list)) $list = [];
-
-  $found = false;
-  for ($i = 0; $i < count($list); $i++) {
-    if (!is_array($list[$i])) continue;
-    $r = oauth_normalize($list[$i]);
-
-    if ($r['provider'] === $provider && $r['sub'] === $sub) {
-      $found = true;
-      $r['user_id'] = $userId;
-      if ($email !== '') $r['email'] = $email;
-      if ($name !== '') $r['name'] = $name;
-      $list[$i] = $r;
-      break;
-    }
-  }
-
-  if (!$found) {
-    $list[] = oauth_normalize([
-      'provider' => $provider,
-      'sub' => $sub,
-      'user_id' => $userId,
-      'email' => $email,
-      'name' => $name,
-      'linked_at' => gmdate('c'),
-    ]);
-  }
-
-  $store['oauth'] = array_values($list);
-  users_save($store);
-
-  return oauth_find($provider, $sub);
-}
-
 /* ============================================================
-   СЕСІЇ ПРИСТРОЇВ (скидати активні сеанси)
+   ✅ СЕСІЇ ПРИСТРОЇВ (одна система, без дублів)
    storage/sessions.json:
-   { "users": { "1": { "sessions": { "sid": {...} }, "revoked": { "sid":"iso" } } } }
+   {
+     "users": {
+       "UID": { "sessions": { "SID": {...}}, "revoked": { "SID": "time" } }
+     }
+   }
 ============================================================ */
 
 function sessions_store_path(): string {
@@ -391,10 +280,13 @@ function sessions_store_path(): string {
 function sessions_load(): array {
   $p = sessions_store_path();
   if (!is_file($p)) return ['users' => []];
+
   $raw = (string)file_get_contents($p);
   if (trim($raw) === '') return ['users' => []];
+
   $data = json_decode($raw, true);
   if (!is_array($data)) return ['users' => []];
+
   if (!isset($data['users']) || !is_array($data['users'])) $data['users'] = [];
   return $data;
 }
@@ -412,10 +304,12 @@ function sessions_save(array $data): void {
   $fp = fopen($tmp, 'wb');
   if (!$fp) throw new RuntimeException('sessions_save: cannot open tmp');
   if (!flock($fp, LOCK_EX)) { fclose($fp); throw new RuntimeException('sessions_save: cannot lock tmp'); }
+
   fwrite($fp, $json);
   fflush($fp);
   flock($fp, LOCK_UN);
   fclose($fp);
+
   @rename($tmp, $p);
 }
 
@@ -435,12 +329,10 @@ function session_current_id_safe(): string {
   return is_string($sid) ? $sid : '';
 }
 
-/**
- * Якщо поточна сесія revoked — розлогін
- */
 function session_enforce_not_revoked(string $uid): void {
   $uid = (string)$uid;
   if ($uid === '') return;
+
   $sid = session_current_id_safe();
   if ($sid === '') return;
 
@@ -453,17 +345,12 @@ function session_enforce_not_revoked(string $uid): void {
 
   if (isset($revoked[$sid])) {
     $_SESSION = [];
-    if (session_status() === PHP_SESSION_ACTIVE) {
-      @session_destroy();
-    }
+    if (session_status() === PHP_SESSION_ACTIVE) @session_destroy();
     header('Location: /login?reason=session_revoked', true, 302);
     exit;
   }
 }
 
-/**
- * Реєструє/оновлює поточну сесію
- */
 function session_register_current(string $uid, string $label = ''): void {
   $uid = (string)$uid;
   if ($uid === '') return;
@@ -483,27 +370,17 @@ function session_register_current(string $uid, string $label = ''): void {
     $data['users'][$uid]['revoked'] = [];
   }
 
-  $now = gmdate('c');
-  $ip = client_ip_guess();
-  $ua = (string)($_SERVER['HTTP_USER_AGENT'] ?? '');
+  // якщо sid був revoked — “розревокати”
+  if (isset($data['users'][$uid]['revoked'][$sid])) unset($data['users'][$uid]['revoked'][$sid]);
 
-  $existing = $data['users'][$uid]['sessions'][$sid] ?? null;
-  if (is_array($existing)) {
-    $existing['last_seen'] = $now;
-    $existing['ip'] = $ip !== '' ? $ip : (string)($existing['ip'] ?? '');
-    $existing['ua'] = $ua !== '' ? $ua : (string)($existing['ua'] ?? '');
-    if ($label !== '') $existing['label'] = $label;
-    $data['users'][$uid]['sessions'][$sid] = $existing;
-  } else {
-    $data['users'][$uid]['sessions'][$sid] = [
-      'sid' => $sid,
-      'ip' => $ip,
-      'ua' => $ua,
-      'created_at' => $now,
-      'last_seen' => $now,
-      'label' => $label,
-    ];
-  }
+  $data['users'][$uid]['sessions'][$sid] = [
+    'sid' => $sid,
+    'label' => (string)$label,
+    'ip' => client_ip_guess(),
+    'ua' => (string)($_SERVER['HTTP_USER_AGENT'] ?? ''),
+    'created_at' => (string)($data['users'][$uid]['sessions'][$sid]['created_at'] ?? gmdate('c')),
+    'last_seen' => gmdate('c'),
+  ];
 
   sessions_save($data);
 }
@@ -511,9 +388,11 @@ function session_register_current(string $uid, string $label = ''): void {
 function sessions_list_for_user(string $uid): array {
   $uid = (string)$uid;
   if ($uid === '') return [];
+
   $data = sessions_load();
   $u = $data['users'][$uid] ?? null;
   if (!is_array($u)) return [];
+
   $sessions = $u['sessions'] ?? null;
   if (!is_array($sessions)) return [];
 
@@ -549,7 +428,6 @@ function session_revoke_for_user(string $uid, string $sid): void {
 
   unset($data['users'][$uid]['sessions'][$sid]);
   $data['users'][$uid]['revoked'][$sid] = gmdate('c');
-
   sessions_save($data);
 }
 

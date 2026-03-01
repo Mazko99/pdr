@@ -5,7 +5,7 @@ function mono_env(string $k, string $def = ''): string {
   $v = getenv($k);
   if (is_string($v) && $v !== '') return $v;
 
-  // fallback: читаємо .env руками (корінь проєкту)
+  // fallback: читаємо .env руками (корінь web-php)
   $envPath = dirname(__DIR__) . '/.env';
   if (!is_file($envPath)) return $def;
 
@@ -15,6 +15,7 @@ function mono_env(string $k, string $def = ''): string {
   foreach ($lines as $line) {
     $line = trim((string)$line);
     if ($line === '' || str_starts_with($line, '#')) continue;
+
     $pos = strpos($line, '=');
     if ($pos === false) continue;
 
@@ -35,7 +36,18 @@ function mono_env(string $k, string $def = ''): string {
   return $def;
 }
 
-function mono_token(): string { return trim(mono_env('MONO_X_TOKEN')); }
+function mono_token(): string {
+  // ✅ main expected env
+  $t = trim(mono_env('MONO_X_TOKEN'));
+  if ($t !== '') return $t;
+
+  // ✅ fallback for your old env name
+  $t2 = trim(mono_env('MONO_MERCHANT_TOKEN'));
+  if ($t2 !== '') return $t2;
+
+  return '';
+}
+
 function mono_ccy(): int { return (int)(mono_env('MONO_CCY', '980')); }
 function mono_app_url(): string { return rtrim(mono_env('APP_URL', ''), '/'); }
 
@@ -80,7 +92,6 @@ function mono_http(string $method, string $path, ?array $payload = null): array 
 }
 
 /**
- * Отримати pubkey (для перевірки підпису вебхуків)
  * GET /api/merchant/pubkey
  */
 function mono_get_pubkey(): string {
@@ -94,11 +105,9 @@ function mono_get_pubkey(): string {
 }
 
 /**
- * Перевірка підпису webhook (mono-sign / x-signature залежить від варіанту)
- * У mono є приклади верифікації у Webhooks. :contentReference[oaicite:2]{index=2}
+ * Verify webhook signature (header name may differ)
  */
 function mono_verify_webhook(string $rawBody, array $headers): bool {
-  // Моно зазвичай шле X-Signature / Mono-Signature (може відрізнятися)
   $sig = '';
   foreach ($headers as $k => $v) {
     $lk = strtolower((string)$k);

@@ -1,59 +1,68 @@
 <?php
 declare(strict_types=1);
 
-// ВАЖЛИВО: цей router.php запускається як:
-// php -S 0.0.0.0:$PORT -t public public/router.php
+/**
+ * Front router for built-in PHP server (php -S).
+ * Must be used as: php -S 0.0.0.0:$PORT -t public public/router.php
+ */
 
-$uriPath = (string)parse_url((string)($_SERVER['REQUEST_URI'] ?? '/'), PHP_URL_PATH);
-if ($uriPath === '') $uriPath = '/';
+$uri = (string)($_SERVER['REQUEST_URI'] ?? '/');
+$path = parse_url($uri, PHP_URL_PATH);
+$path = is_string($path) ? $path : '/';
 
 $publicDir = __DIR__;
-$fullPath = realpath($publicDir . $uriPath);
+$clean = '/' . ltrim($path, '/');
 
-// 1) якщо це існуючий файл всередині public — віддай як файл (php включно)
-if ($fullPath !== false) {
-  $publicReal = realpath($publicDir);
-  if ($publicReal !== false && str_starts_with($fullPath, $publicReal)) {
-
-    if (is_file($fullPath)) {
-      $ext = strtolower(pathinfo($fullPath, PATHINFO_EXTENSION));
-      if ($ext === 'php') {
-        require $fullPath;
-      } else {
-        return false; // нехай built-in server віддасть статику
-      }
-      exit;
-    }
-
-    // 2) якщо це директорія — пробуй index.php
-    if (is_dir($fullPath)) {
-      $indexPhp = rtrim($fullPath, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . 'index.php';
-      if (is_file($indexPhp)) {
-        require $indexPhp;
-        exit;
-      }
-    }
+// 1) If file exists in /public -> serve it directly
+$full = realpath($publicDir . $clean);
+if ($full !== false) {
+  $pubReal = realpath($publicDir);
+  if ($pubReal !== false && str_starts_with($full, $pubReal) && is_file($full)) {
+    return false; // let PHP serve static file
   }
 }
 
-// 3) спеціально: /pay та /pay/ → /pay/index.php
-if ($uriPath === '/pay' || $uriPath === '/pay/') {
+// 2) Directory -> try index.php inside it
+if (str_ends_with($clean, '/')) {
+  $idx = $publicDir . rtrim($clean, '/') . '/index.php';
+  if (is_file($idx)) {
+    require $idx;
+    exit;
+  }
+}
+
+// 3) If URL without ".php" points to folder with index.php
+$maybeDirIndex = $publicDir . $clean . '/index.php';
+if (is_file($maybeDirIndex)) {
+  require $maybeDirIndex;
+  exit;
+}
+
+// 4) If URL without ".php" matches "/xxx" and "/xxx.php" exists
+$maybePhp = $publicDir . $clean . '.php';
+if (is_file($maybePhp)) {
+  require $maybePhp;
+  exit;
+}
+
+// 5) Special: /pay should go to /pay/index.php even if missing trailing slash
+if ($clean === '/pay') {
   $payIndex = $publicDir . '/pay/index.php';
   if (is_file($payIndex)) {
     require $payIndex;
     exit;
   }
-  http_response_code(404);
-  echo "pay/index.php not found";
-  exit;
 }
 
-// 4) дефолт: головна index.php (або 404)
-$rootIndex = $publicDir . '/index.php';
-if (is_file($rootIndex)) {
-  require $rootIndex;
+// 6) Fallback -> main site index.php
+$main = $publicDir . '/index.php';
+if (is_file($main)) {
+  require $main;
   exit;
 }
 
 http_response_code(404);
-echo "index.php not found";
+header('Content-Type: text/plain; charset=utf-8');
+echo "404 not found\n";
+echo "URI={$uri}\n";
+echo "PATH={$clean}\n";
