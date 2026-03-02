@@ -333,7 +333,27 @@ function session_revoke_for_user(string $userId, string $sid): void {
 function session_current_id_safe(): string {
   return session_status() === PHP_SESSION_ACTIVE ? session_id() : '';
 }
+function sessions_revoke(string $sid): void {
+  $sid = (string)$sid;
+  if ($sid === '') return;
 
+  $all = sessions_read();
+  if (!is_array($all) || empty($all)) return;
+
+  $changed = false;
+
+  foreach ($all as $userId => $map) {
+    if (!is_array($map)) continue;
+    if (isset($map[$sid])) {
+      unset($all[$userId][$sid]);
+      $changed = true;
+    }
+  }
+
+  if ($changed) {
+    sessions_write($all);
+  }
+}
 /**
  * ✅ ДОДАНО: виставити план + expires
  * Використовуй у webhook після успішної оплати/підтвердження trial.

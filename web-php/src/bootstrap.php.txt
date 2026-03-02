@@ -1,20 +1,9 @@
 <?php
 declare(strict_types=1);
 
-if (session_status() !== PHP_SESSION_ACTIVE) {
-  // ✅ щоб cookie/сесія була однакова для всього сайту (часто лікує redirect-loop)
-  session_set_cookie_params([
-    'lifetime' => 0,
-    'path' => '/',
-    'httponly' => true,
-    'samesite' => 'Lax',
-  ]);
-  session_start();
-}
-
 /**
  * Простий .env loader (без бібліотек).
- * Читає файл web-php/.env або web-php/public/.env (якщо раптом там).
+ * ВАЖЛИВО: завантажуємо .env ДО session_start(), щоб COOKIE_DOMAIN працював.
  */
 (function () {
   $candidates = [
@@ -33,7 +22,7 @@ if (session_status() !== PHP_SESSION_ACTIVE) {
   if (!$lines) return;
 
   foreach ($lines as $line) {
-    $line = trim($line);
+    $line = trim((string)$line);
     if ($line === '' || str_starts_with($line, '#')) continue;
 
     $pos = strpos($line, '=');
@@ -43,7 +32,10 @@ if (session_status() !== PHP_SESSION_ACTIVE) {
     $val = trim(substr($line, $pos + 1));
 
     // прибираємо лапки якщо є
-    if ((str_starts_with($val, '"') && str_ends_with($val, '"')) || (str_starts_with($val, "'") && str_ends_with($val, "'"))) {
+    if (
+      (str_starts_with($val, '"') && str_ends_with($val, '"')) ||
+      (str_starts_with($val, "'") && str_ends_with($val, "'"))
+    ) {
       $val = substr($val, 1, -1);
     }
 
@@ -54,6 +46,33 @@ if (session_status() !== PHP_SESSION_ACTIVE) {
     }
   }
 })();
+
+/**
+ * ✅ Єдиний правильний старт сесії для www і без www:
+ * - domain = .prostopdr.com (з .env)
+ * - secure визначаємо через HTTPS або X_FORWARDED_PROTO (Railway/Cloudflare)
+ */
+if (session_status() !== PHP_SESSION_ACTIVE) {
+  $cookieDomain = (string)(getenv('COOKIE_DOMAIN') ?: '');
+
+  $isHttps = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
+    || ((string)($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https');
+
+  $params = [
+    'lifetime' => 0,
+    'path' => '/',
+    'httponly' => true,
+    'samesite' => 'Lax',
+    'secure' => $isHttps,
+  ];
+
+  if ($cookieDomain !== '') {
+    $params['domain'] = $cookieDomain; // ✅ спільно для www і без www
+  }
+
+  session_set_cookie_params($params);
+  session_start();
+}
 
 require_once __DIR__ . '/db.php';
 // users_store.php підключай у тих файлах, де потрібен (plan.php/email.php вже підключають)
@@ -102,6 +121,28 @@ function auth_login(string $userId): void {
 function auth_logout(): void {
   unset($_SESSION['user_id']);
   unset($_SESSION['has_access'], $_SESSION['plan']);
+}
+
+// ---- Device policy: single active session + 2 remembered devices
+// Підключай device_sessions.php ОДИН РАЗ (краще в bootstrap)
+$dsFile = __DIR__ . '/device_sessions.php';
+if (is_file($dsFile)) {
+  require_once $dsFile;
+}
+
+function auth_enforce_device_policy(): void {
+  $uid = auth_user_id();
+  if (!$uid) return;
+
+  if (!function_exists('ds_is_session_active')) return;
+
+  $sid = session_status() === PHP_SESSION_ACTIVE ? session_id() : '';
+  if ($sid === '') return;
+
+  if (!ds_is_session_active($uid, $sid)) {
+    auth_logout();
+    redirect('/login?reason=another_device');
+  }
 }
 
 /**
