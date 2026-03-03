@@ -2,24 +2,16 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/../../src/bootstrap.php';
+// users_store.php тут не обов’язковий, але можна лишити (він не шкодить)
 require_once __DIR__ . '/../../src/users_store.php';
 
-// 1) Треба бути залогіненим
-if (!auth_user_id()) {
-  redirect('/login');
-}
-
-// 2) Підтягнути актуальний доступ/план (опційно, але бажано)
-auth_refresh_access();
-
-// 3) Перевірка політики "1 активний пристрій"
-auth_enforce_device_policy();
+// ✅ Якщо вже залогінений — в кабінет (і все)
 if (auth_user_id()) {
   redirect('/account');
 }
 
 /**
- * ✅ ДОДАНО: красиві повідомлення для:
+ * ✅ Повідомлення:
  * - ?reason=another_device
  * - ?reason=max_devices
  */
@@ -28,7 +20,6 @@ $reason = isset($_GET['reason']) ? (string)$_GET['reason'] : '';
 $err = isset($_GET['err']) ? (string)$_GET['err'] : '';
 $ok  = isset($_GET['ok']) ? (string)$_GET['ok'] : '';
 
-// якщо err/ok не задані вручну — підставляємо reason
 if ($err === '' && $ok === '' && $reason !== '') {
   if ($reason === 'another_device') {
     $err = 'Сесію завершено: в акаунт увійшли з іншого пристрою. Якщо це були не ви — змініть пароль.';
@@ -155,7 +146,7 @@ $csrf = csrf_token();
       .auth-wrap{ grid-template-columns: 1fr; }
     }
 
-    /* ✅ ДОДАНО: OAuth блок */
+    /* ✅ OAuth блок */
     .oauth-sep{
       display:flex;
       align-items:center;
@@ -262,11 +253,9 @@ $csrf = csrf_token();
             </div>
           </form>
 
-          <!-- ✅ ДОДАНО: Вхід через Google -->
           <div class="oauth-sep">або</div>
           <div class="row">
             <a class="btn-oauth" href="/auth/google/start.php" aria-label="Увійти через Google">
-              <!-- inline Google icon (простий) -->
               <svg class="btn-oauth__icon" viewBox="0 0 48 48" aria-hidden="true">
                 <path fill="#FFC107" d="M43.611 20.083H42V20H24v8h11.303C33.652 32.659 29.215 36 24 36c-6.627 0-12-5.373-12-12s5.373-12 12-12c3.059 0 5.842 1.154 7.957 3.043l5.657-5.657C34.046 6.053 29.268 4 24 4 12.955 4 4 12.955 4 24s8.955 20 20 20 20-8.955 20-20c0-1.341-.138-2.65-.389-3.917z"/>
                 <path fill="#FF3D00" d="M6.306 14.691l6.571 4.819C14.655 16.108 19.001 12 24 12c3.059 0 5.842 1.154 7.957 3.043l5.657-5.657C34.046 6.053 29.268 4 24 4c-7.682 0-14.39 4.326-17.694 10.691z"/>
@@ -276,7 +265,6 @@ $csrf = csrf_token();
               Увійти через Google
             </a>
           </div>
-
         </section>
 
         <aside class="auth-side">

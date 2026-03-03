@@ -1,0 +1,28 @@
+RewriteEngine On
+
+# =========================================================
+# 1) Канонічний домен + HTTPS (вибери без www)
+# =========================================================
+
+# www -> non-www
+RewriteCond %{HTTP_HOST} ^www\.prostopdr\.com$ [NC]
+RewriteRule ^ https://prostopdr.com%{REQUEST_URI} [R=301,L]
+
+# http -> https (Railway зазвичай прокидує X-Forwarded-Proto)
+RewriteCond %{HTTP:X-Forwarded-Proto} !https [NC]
+RewriteRule ^ https://prostopdr.com%{REQUEST_URI} [R=301,L]
+
+# =========================================================
+# 2) FIX петлі /login <-> /login/
+#    (якщо login це директорія з index.php)
+# =========================================================
+RewriteRule ^login$ /login/ [R=301,L]
+RewriteRule ^pay$ /pay/ [R=301,L]
+RewriteRule ^register$ /register/ [R=301,L]
+
+# =========================================================
+# 3) Нормальний front-controller: все не-файли/не-папки -> index.php
+# =========================================================
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^ index.php [L]

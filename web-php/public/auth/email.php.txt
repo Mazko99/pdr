@@ -4,10 +4,6 @@ declare(strict_types=1);
 require_once __DIR__ . '/../../src/bootstrap.php';
 require_once __DIR__ . '/../../src/users_store.php';
 
-if (session_status() !== PHP_SESSION_ACTIVE) {
-  session_start();
-}
-
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
   http_response_code(405);
   exit('Method not allowed');
@@ -39,32 +35,29 @@ if ($mode === 'register') {
   }
 
   $hash = password_hash($pass, PASSWORD_DEFAULT);
-  $uid = user_create($email, $name, $hash);
+  $uid = (string)user_create($email, $name, $hash);
 
-  auth_login((string)$uid);
+  auth_login($uid);
 
-  // ✅ Реєстрація сесії (для адмінки/кабінету "Активні сеанси")
+  // sessions.json (опційно)
   if (function_exists('session_register_current')) {
-    session_register_current((string)$uid, 'Email register');
+    session_register_current($uid, 'Email register');
   }
 
-  // ✅ Device policy: 2 remembered + 1 active
+  // device policy: 2 remembered + 1 active
   if (function_exists('ds_on_login')) {
-    $res = ds_on_login((string)$uid, session_id(), 2);
+    $res = ds_on_login($uid, session_id(), 2);
     if (!($res['ok'] ?? false)) {
       auth_logout();
       redirect('/login?reason=max_devices');
     }
   }
 
-  // опційно: одразу підрахувати доступ
   auth_refresh_access();
-
   redirect('/account/index.php');
 }
 
-// ------------------ LOGIN ------------------
-
+// ---- login ----
 if ($pass === '') {
   redirect('/login?err=' . rawurlencode('Введи пароль'));
 }
@@ -78,22 +71,21 @@ if (!user_verify_password($user, $pass)) {
   redirect('/login?err=' . rawurlencode('Невірний пароль'));
 }
 
-$userId = (string)($user['id'] ?? '');
-if ($userId === '') {
-  redirect('/login?err=' . rawurlencode('Помилка акаунта. Спробуй ще раз.'));
+$uid = (string)($user['id'] ?? '');
+if ($uid === '') {
+  redirect('/login?err=' . rawurlencode('Помилка акаунта: відсутній ID'));
 }
 
-auth_login($userId);
+auth_login($uid);
 
-// ✅ Реєстрація сесії (один раз!)
+// sessions.json (опційно)
 if (function_exists('session_register_current')) {
-  session_register_current($userId, 'Email login');
+  session_register_current($uid, 'Email login');
 }
 
-// ✅ Device policy: 2 remembered + 1 active
-// (якщо ліміт 2 пристроїв перевищено — не пускаємо)
+// device policy: 2 remembered + 1 active
 if (function_exists('ds_on_login')) {
-  $res = ds_on_login($userId, session_id(), 2);
+  $res = ds_on_login($uid, session_id(), 2);
   if (!($res['ok'] ?? false)) {
     auth_logout();
     redirect('/login?reason=max_devices');
@@ -101,5 +93,4 @@ if (function_exists('ds_on_login')) {
 }
 
 auth_refresh_access();
-
 redirect('/account/index.php');

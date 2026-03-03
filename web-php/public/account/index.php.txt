@@ -1,8 +1,8 @@
 <?php
 declare(strict_types=1);
 
-$bootstrap = __DIR__ . '/../../src/bootstrap.php';
-$usersStore = __DIR__ . '/../../src/users_store.php';
+require_once __DIR__ . '/../../src/bootstrap.php';
+require_once __DIR__ . '/../../src/users_store.php';
 
 // 1) Треба бути залогіненим
 if (!auth_user_id()) {
@@ -12,11 +12,11 @@ if (!auth_user_id()) {
 // 2) Підтягнути актуальний доступ/план (опційно, але бажано)
 auth_refresh_access();
 
-// 3) Перевірка політики "1 активний пристрій"
+// 3) ✅ Перевірка політики "1 активна сесія"
+// (якщо увійшли з іншого пристрою — вилетить на /login?reason=another_device)
 auth_enforce_device_policy();
 
-if (is_file($bootstrap)) require_once $bootstrap;
-if (is_file($usersStore)) require_once $usersStore;
+// Далі — ТВОЯ ОРИГІНАЛЬНА ЛОГІКА/HTML/СТИЛІ без змін
 
 if (session_status() !== PHP_SESSION_ACTIVE) {
   @session_start();
@@ -647,7 +647,7 @@ $sessions = function_exists('sessions_list_for_user') ? sessions_list_for_user($
             </div>
             <?php if ($mistakesCount === 0): ?>
               <div class="lock-note" style="margin-top:12px;">
-                Поки що помилок немає. Вони з’являться після проходження тестів (коли відповіси неправильно).
+                Поки що помилок немає. Вони з’являться після проходження тестів (коли ви дасте невірну відповідь ).
               </div>
             <?php endif; ?>
           </div>
