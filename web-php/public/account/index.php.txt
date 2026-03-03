@@ -65,13 +65,28 @@ $flash_ok = (string)($_SESSION['flash_ok'] ?? '');
 $flash_err = (string)($_SESSION['flash_err'] ?? '');
 unset($_SESSION['flash_ok'], $_SESSION['flash_err']);
 
-// ---- Access ----
-$hasAccess = false;
-if (is_array($user)) {
-  if (!empty($user['plan'])) $hasAccess = true; // basic
-  if (!empty($user['subscription']) || !empty($user['subscription_until']) || !empty($user['expires_at'])) $hasAccess = true;
+// ---- Access (правильно по expires_at) ----
+function user_has_access_local(?array $u): bool {
+  if (!is_array($u)) return false;
+
+  $plan = (string)($u['plan'] ?? 'free');
+  if ($plan === '' || $plan === 'free') return false;
+
+  $exp = (string)($u['expires_at'] ?? '');
+  if ($exp === '') return false;
+
+  $ts = strtotime($exp);
+  if (!$ts) return false;
+
+  return $ts > time();
 }
-if (!empty($_SESSION['has_access'])) $hasAccess = true;
+
+$hasAccess = user_has_access_local($user);
+
+// якщо ти десь виставляєш $_SESSION['has_access'] — нехай тільки ПІДТВЕРДЖУЄ, але не відкриває доступ “в лоб”
+if (!empty($_SESSION['has_access']) && $hasAccess === false) {
+  // нічого не робимо
+}
 
 // ---- Заглушка підписок ----
 $subscription = [
@@ -492,9 +507,20 @@ $sessions = function_exists('sessions_list_for_user') ? sessions_list_for_user($
                 </ul>
 
                 <div class="plan__cta-row">
-                  <a class="btn btn--ghost plan__cta" href="/pay/?a=checkout&mode=trial&plan=base">Отримати 3 дні безкоштовно</a>
-                  <a class="btn btn--primary plan__cta" href="/pay/?a=checkout&mode=buy&plan=base">Обрати</a>
-                </div>
+                  <form method="post" action="/pay/create.php" style="display:inline;">
+                    <input type="hidden" name="csrf" value="<?= h($csrf) ?>">
+                    <input type="hidden" name="action" value="trial">
+                    <input type="hidden" name="plan" value="30">
+                    <button class="btn btn--ghost plan__cta" type="submit">Отримати 3 дні безкоштовно</button>
+     		  </form>
+
+  		  <form method="post" action="/pay/create.php" style="display:inline;">
+    		    <input type="hidden" name="csrf" value="<?= h($csrf) ?>">
+    		    <input type="hidden" name="action" value="buy">
+    		    <input type="hidden" name="plan" value="30">
+                    <button class="btn btn--primary plan__cta" type="submit">Обрати</button>
+  		  </form>
+		</div>
               </article>
 
               <!-- ✅ ДОДАНО: 349/12 днів (такий самий стиль кнопок) -->
@@ -523,9 +549,20 @@ $sessions = function_exists('sessions_list_for_user') ? sessions_list_for_user($
                 </ul>
 
                 <div class="plan__cta-row">
-                  <a class="btn btn--ghost plan__cta" href="/pay/?a=checkout&mode=trial&plan=12d">Отримати 3 дні безкоштовно</a>
-                  <a class="btn btn--primary plan__cta" href="/pay/?a=checkout&mode=buy&plan=12d">Обрати</a>
-                </div>
+                  <form method="post" action="/pay/create.php" style="display:inline;">
+    	            <input type="hidden" name="csrf" value="<?= h($csrf) ?>">
+    		    <input type="hidden" name="action" value="trial">
+    		    <input type="hidden" name="plan" value="12">
+    		    <button class="btn btn--ghost plan__cta" type="submit">Отримати 3 дні безкоштовно</button>
+  		  </form>
+
+  		<form method="post" action="/pay/create.php" style="display:inline;">
+                  <input type="hidden" name="csrf" value="<?= h($csrf) ?>">
+    		  <input type="hidden" name="action" value="buy">
+    		  <input type="hidden" name="plan" value="12">
+    	  	  <button class="btn btn--primary plan__cta" type="submit">Обрати</button>
+  		</form>
+	      </div>
               </article>
 
             </div>
