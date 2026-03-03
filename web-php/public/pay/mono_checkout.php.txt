@@ -21,10 +21,9 @@ $isAuth = ($userId !== '');
 $mode = (string)($_GET['mode'] ?? 'buy');   // buy|trial
 $plan = (string)($_GET['plan'] ?? 'base');  // base|12d
 
-// ціни в "копійках"
 $PRICE = [
-  'base' => 69900,  // 699.00 грн
-  '12d'  => 38999,  // 389.99 грн
+  'base' => 69900,
+  '12d'  => 38999,
 ];
 
 if (!isset($PRICE[$plan])) {
@@ -41,10 +40,9 @@ if ($app === '') {
 $successUrl = $app . '/account?tab=dashboard&pay=success';
 $failUrl    = $app . '/account?tab=dashboard&pay=fail';
 
-// ✅ ВАЖЛИВО: вебхук тепер через /pay/?a=webhook
-$webhookUrl = $app . '/pay/?a=webhook';
+// ✅ ТЕПЕР правильний вебхук
+$webhookUrl = $app . '/pay/mono_webhook.php';
 
-// Гість: робимо тимчасовий userId як g_{sessionId}
 if (!$isAuth) {
   if (!isset($_SESSION['guest_chat_id'])) {
     $_SESSION['guest_chat_id'] = 'g_' . bin2hex(random_bytes(10));
@@ -72,7 +70,6 @@ if ($mode === 'trial') {
     exit;
   }
 
-  // сума для “привʼязки”
   $holdAmount = (int)mono_env('MONO_TRIAL_HOLD_AMOUNT', '100');
   if ($holdAmount < 1) $holdAmount = 100;
 

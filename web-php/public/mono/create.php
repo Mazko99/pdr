@@ -17,7 +17,6 @@ csrf_verify($_POST['csrf'] ?? null);
 
 $action = (string)($_POST['action'] ?? 'buy'); // buy|trial
 $plan   = (string)($_POST['plan'] ?? '30');    // 12|30
-
 if ($plan !== '12' && $plan !== '30') $plan = '30';
 
 $uid = auth_user_id();
@@ -31,8 +30,8 @@ if (!is_array($u)) {
 }
 
 // amounts in kop
-$amount12 = (int)getenv('PLAN_12_AMOUNT');
-$amount30 = (int)getenv('PLAN_30_AMOUNT');
+$amount12  = (int)getenv('PLAN_12_AMOUNT');
+$amount30  = (int)getenv('PLAN_30_AMOUNT');
 $trialHold = (int)getenv('TRIAL_HOLD_AMOUNT');
 $trialDays = (int)getenv('TRIAL_DAYS');
 if ($trialDays <= 0) $trialDays = 3;
@@ -41,6 +40,7 @@ $amount = ($plan === '12') ? $amount12 : $amount30;
 if ($amount <= 0) $amount = ($plan === '12') ? 38999 : 69900;
 if ($trialHold <= 0) $trialHold = 100;
 
+// URLs from ENV
 $returnUrl  = mono_env('MONO_RETURN_URL', '');
 $webhookUrl = mono_env('MONO_WEBHOOK_URL', '');
 
@@ -48,25 +48,29 @@ if ($returnUrl === '' || $webhookUrl === '') {
   redirect('/account?tab=dashboard&err=' . rawurlencode('Mono не налаштовано: RETURN/WEBHOOK URL'));
 }
 
-$orderId = 'u' . $uid . '_' . time() . '_' . bin2hex(random_bytes(3));
+// Ми маємо ЗРОБИТИ reference у форматі, який вміє твій mono_webhook.php:
+// - trial_bind_{userId}_{ts}
+// - buy_{planCode}_{userId}_{ts}
+// planCode для webhook: base|12d
+$planCode = ($plan === '12') ? '12d' : 'base';
+
+if ($action === 'trial') {
+  $orderId = 'trial_bind_' . $uid . '_' . time();
+} else {
+  $orderId = 'buy_' . $planCode . '_' . $uid . '_' . time();
+}
 
 $title = ($action === 'trial')
-  ? ('Тріал 3 дні + прив’язка картки (1 грн) — План ' . $plan)
+  ? ('Тріал ' . $trialDays . ' дні + прив’язка картки (1 грн) — План ' . $plan)
   : ('Оплата плану ' . $plan);
 
 $finalAmount = ($action === 'trial') ? $trialHold : $amount;
 
-/**
- * ВАЖЛИВО:
- * щоб отримати walletId / токенізацію — в mono треба включити tokenization
- * і в invoice payload увімкнути збереження картки (параметр залежить від твоєї конфігурації mono).
- * Якщо в твоєму merchant кабінеті це ввімкнено — mono поверне walletId у статусі/вебхуку.
- */
 $payload = [
   'amount' => $finalAmount,
   'ccy' => 980,
   'merchantPaymInfo' => [
-    'reference' => $orderId,
+    'reference' => $orderId, // <-- головне: ref у правильному форматі
     'destination' => $title,
     'comment' => $title,
     'basketOrder' => [
@@ -80,13 +84,19 @@ $payload = [
       ]
     ],
   ],
-  'redirectUrl' => $returnUrl . '?invoice=' . rawurlencode($orderId),
+  'redirectUrl' => $returnUrl . '&invoice=' . rawurlencode($orderId),
   'webHookUrl'  => $webhookUrl,
 ];
 
+// Якщо trial — попросимо збереження картки (як у твоєму checkout.php)
+if ($action === 'trial') {
+  $payload['saveCardData'] = ['saveCard' => true];
+}
+
 // create invoice
 $res = mono_create_invoice($payload);
-if (($res['code'] ?? 0) < 200 || ($res['code'] ?? 0) >= 300) {
+$code = (int)($res['code'] ?? 0);
+if ($code < 200 || $code >= 300) {
   redirect('/account?tab=dashboard&err=' . rawurlencode('Mono create invoice error'));
 }
 
@@ -98,13 +108,13 @@ if ($invoiceId === '' || $pageUrl === '') {
   redirect('/account?tab=dashboard&err=' . rawurlencode('Mono invoice response invalid'));
 }
 
-// store
+// store (для себе)
 mono_invoice_put([
   'invoice_id' => $invoiceId,
   'order_ref'  => $orderId,
   'user_id'    => (string)$uid,
   'kind'       => ($action === 'trial') ? 'trial_hold' : 'plan_buy',
-  'plan'       => $plan,
+  'plan'       => $planCode, // base|12d
   'amount'     => $finalAmount,
   'status'     => 'created',
   'created_at' => gmdate('c'),
@@ -115,5 +125,14 @@ mono_invoice_put([
     'name'  => (string)($u['name'] ?? ''),
   ],
 ]);
+
+// ВАЖЛИВО: щоб mono_webhook.php видав trial правильного плану
+if ($action === 'trial') {
+  $u['trial_pending_plan'] = $planCode; // base|12d
+  user_upsert($u);
+} else {
+  $u['buy_pending_plan'] = $planCode; // base|12d
+  user_upsert($u);
+}
 
 redirect($pageUrl);

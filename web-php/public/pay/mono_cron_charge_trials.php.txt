@@ -13,7 +13,6 @@ if ($secret === '' || !hash_equals($secret, $got)) {
   exit('forbidden');
 }
 
-// ціни
 $PRICE = [
   'base' => 69900,
   '12d'  => 38999,
@@ -21,7 +20,6 @@ $PRICE = [
 
 $now = time();
 
-// Потрібна функція users_all(). Якщо в твоєму users_store.php назва інша — скажеш.
 $users = users_all();
 
 foreach ($users as $u) {
@@ -45,7 +43,6 @@ foreach ($users as $u) {
   $trialExpTs = strtotime($trialExpires);
   if (!$trialExpTs) continue;
 
-  // настав час списати
   if ($now < $trialExpTs) continue;
 
   $plan = (string)($u['plan'] ?? 'base');
@@ -54,7 +51,6 @@ foreach ($users as $u) {
   $cardToken = (string)($u['mono_card_token'] ?? '');
   if ($cardToken === '') continue;
 
-  // Списуємо ОДИН РАЗ по токену
   $payload = [
     'cardToken' => $cardToken,
     'amount' => (int)$PRICE[$plan],
@@ -65,14 +61,14 @@ foreach ($users as $u) {
       'destination' => 'ProstoPDR: списання після trial (' . $plan . ')',
       'comment' => 'Trial charge',
     ],
-    'webHookUrl' => mono_app_url() . '/pay/?a=webhook',
+    // ✅ правильний webhook
+    'webHookUrl' => mono_app_url() . '/pay/mono_webhook.php',
     'redirectUrl' => mono_app_url() . '/account?tab=dashboard&pay=success',
   ];
 
   $r = mono_http('POST', '/api/merchant/wallet/payment', $payload);
 
   if ($r['code'] === 200) {
-    // продовжити доступ: 12 або 30 днів
     if ($plan === '12d') {
       $u['expires_at'] = gmdate('c', time() + 12 * 86400);
     } else {
@@ -83,8 +79,6 @@ foreach ($users as $u) {
     $u['mono_last_payment_at'] = gmdate('c');
 
     user_upsert($u);
-  } else {
-    // за бажанням: лог $r['data']
   }
 }
 
