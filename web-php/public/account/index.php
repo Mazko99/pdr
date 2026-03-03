@@ -508,19 +508,18 @@ $sessions = function_exists('sessions_list_for_user') ? sessions_list_for_user($
 
                 <div class="plan__cta-row">
                   <form method="post" action="/pay/create.php" style="display:inline;">
-                    <input type="hidden" name="csrf" value="<?= h($csrf) ?>">
+                    <input type="hidden" name="csrf" value="<?= h(csrf_token()) ?>">
                     <input type="hidden" name="action" value="trial">
                     <input type="hidden" name="plan" value="30">
                     <button class="btn btn--ghost plan__cta" type="submit">Отримати 3 дні безкоштовно</button>
-     		  </form>
+                  </form>
 
   		  <form method="post" action="/pay/create.php" style="display:inline;">
-    		    <input type="hidden" name="csrf" value="<?= h($csrf) ?>">
-    		    <input type="hidden" name="action" value="buy">
-    		    <input type="hidden" name="plan" value="30">
+                    <input type="hidden" name="csrf" value="<?= h(csrf_token()) ?>">
+                    <input type="hidden" name="action" value="buy">
+                    <input type="hidden" name="plan" value="30">
                     <button class="btn btn--primary plan__cta" type="submit">Обрати</button>
-  		  </form>
-		</div>
+                  </form>
               </article>
 
               <!-- ✅ ДОДАНО: 349/12 днів (такий самий стиль кнопок) -->
@@ -550,17 +549,17 @@ $sessions = function_exists('sessions_list_for_user') ? sessions_list_for_user($
 
                 <div class="plan__cta-row">
                   <form method="post" action="/pay/create.php" style="display:inline;">
-    	            <input type="hidden" name="csrf" value="<?= h($csrf) ?>">
-    		    <input type="hidden" name="action" value="trial">
-    		    <input type="hidden" name="plan" value="12">
-    		    <button class="btn btn--ghost plan__cta" type="submit">Отримати 3 дні безкоштовно</button>
-  		  </form>
+                  <input type="hidden" name="csrf" value="<?= h(csrf_token()) ?>">
+                  <input type="hidden" name="action" value="trial">
+                  <input type="hidden" name="plan" value="12">
+                  <button class="btn btn--ghost plan__cta" type="submit">Отримати 3 дні безкоштовно</button>
+                </form>
 
   		<form method="post" action="/pay/create.php" style="display:inline;">
-                  <input type="hidden" name="csrf" value="<?= h($csrf) ?>">
-    		  <input type="hidden" name="action" value="buy">
-    		  <input type="hidden" name="plan" value="12">
-    	  	  <button class="btn btn--primary plan__cta" type="submit">Обрати</button>
+                  <input type="hidden" name="csrf" value="<?= h(csrf_token()) ?>">
+                  <input type="hidden" name="action" value="buy">
+                  <input type="hidden" name="plan" value="12">
+                  <button class="btn btn--primary plan__cta" type="submit">Обрати</button>
   		</form>
 	      </div>
               </article>
