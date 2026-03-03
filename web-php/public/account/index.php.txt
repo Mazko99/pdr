@@ -492,8 +492,8 @@ $sessions = function_exists('sessions_list_for_user') ? sessions_list_for_user($
                 </ul>
 
                 <div class="plan__cta-row">
-                  <a class="btn btn--ghost plan__cta" href="/auth/?next=/pay/?a=checkout&mode=trial&plan=base">Отримати 3 дні безкоштовно</a>
-                  <a class="btn btn--primary plan__cta" href="/auth/?next=/pay/?a=checkout&mode=buy&plan=base">Обрати</a>
+                  <a class="btn btn--ghost plan__cta" href="/pay/?a=checkout&mode=trial&plan=base">Отримати 3 дні безкоштовно</a>
+                  <a class="btn btn--primary plan__cta" href="/pay/?a=checkout&mode=buy&plan=base">Обрати</a>
                 </div>
               </article>
 
@@ -523,8 +523,8 @@ $sessions = function_exists('sessions_list_for_user') ? sessions_list_for_user($
                 </ul>
 
                 <div class="plan__cta-row">
-                  <a class="btn btn--ghost plan__cta" href="/auth/?next=/pay/?a=checkout&mode=trial&plan=12d">Отримати 3 дні безкоштовно</a>
-                  <a class="btn btn--primary plan__cta" href="/auth/?next=/pay/?a=checkout&mode=buy&plan=12d">Обрати</a>
+                  <a class="btn btn--ghost plan__cta" href="/pay/?a=checkout&mode=trial&plan=12d">Отримати 3 дні безкоштовно</a>
+                  <a class="btn btn--primary plan__cta" href="/pay/?a=checkout&mode=buy&plan=12d">Обрати</a>
                 </div>
               </article>
 
