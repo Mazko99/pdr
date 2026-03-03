@@ -9,6 +9,9 @@ require_once __DIR__ . '/../../src/users_store.php';
 if (auth_user_id()) {
   redirect('/account');
 }
+$next = isset($_GET['next']) ? (string)$_GET['next'] : '';
+$nextSafe = '';
+if ($next !== '' && str_starts_with($next, '/')) $nextSafe = $next;
 
 /**
  * ✅ Повідомлення:

@@ -2,28 +2,19 @@
 declare(strict_types=1);
 
 /**
- * ВАЖЛИВО: session cookie на весь сайт, інакше бувають редірект-лупи
- * (коли /account бачить одну сесію, /login іншу, або cookie не ставиться).
+ * ProstoPDR bootstrap.php
+ * - Loads .env BEFORE session_start (so COOKIE_DOMAIN works)
+ * - Starts one consistent session for www and non-www
+ * - Provides helpers: env(), redirect(), csrf_*, auth_*
+ * - Includes device_sessions.php once (if exists)
  */
-if (session_status() !== PHP_SESSION_ACTIVE) {
-  session_set_cookie_params([
-    'lifetime' => 0,
-    'path' => '/',
-    'httponly' => true,
-    'samesite' => 'Lax',
-  ]);
-  session_start();
-}
 
-/**
- * Простий .env loader (без бібліотек).
- * Читає файл web-php/.env або web-php/public/.env (якщо раптом там).
- */
+// -------------------- .env loader (NO libs) --------------------
 (function () {
   $candidates = [
     dirname(__DIR__) . '/.env',          // web-php/.env
-    dirname(__DIR__, 2) . '/.env',       // якщо структура інша
-    dirname(__DIR__) . '/public/.env',   // web-php/public/.env (на всяк)
+    dirname(__DIR__, 2) . '/.env',       // fallback if structure differs
+    dirname(__DIR__) . '/public/.env',   // optional
   ];
 
   $envFile = null;
@@ -36,7 +27,7 @@ if (session_status() !== PHP_SESSION_ACTIVE) {
   if (!$lines) return;
 
   foreach ($lines as $line) {
-    $line = trim($line);
+    $line = trim((string)$line);
     if ($line === '' || str_starts_with($line, '#')) continue;
 
     $pos = strpos($line, '=');
@@ -45,12 +36,14 @@ if (session_status() !== PHP_SESSION_ACTIVE) {
     $key = trim(substr($line, 0, $pos));
     $val = trim(substr($line, $pos + 1));
 
-    // прибираємо лапки якщо є
-    if ((str_starts_with($val, '"') && str_ends_with($val, '"')) || (str_starts_with($val, "'") && str_ends_with($val, "'"))) {
+    // strip quotes
+    if (
+      (str_starts_with($val, '"') && str_ends_with($val, '"')) ||
+      (str_starts_with($val, "'") && str_ends_with($val, "'"))
+    ) {
       $val = substr($val, 1, -1);
     }
 
-    // не перезаписуємо, якщо вже задано в середовищі
     if (getenv($key) === false) {
       putenv($key . '=' . $val);
       $_ENV[$key] = $val;
@@ -58,14 +51,34 @@ if (session_status() !== PHP_SESSION_ACTIVE) {
   }
 })();
 
+// -------------------- Session (shared for www/non-www) --------------------
+if (session_status() !== PHP_SESSION_ACTIVE) {
+  $cookieDomain = (string)(getenv('COOKIE_DOMAIN') ?: '');
+
+  $isHttps =
+    (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
+    || ((string)($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https');
+
+  $params = [
+    'lifetime' => 0,
+    'path' => '/',
+    'httponly' => true,
+    'samesite' => 'Lax',
+    'secure' => $isHttps,
+  ];
+
+  // domain only if provided
+  if ($cookieDomain !== '') {
+    $params['domain'] = $cookieDomain; // e.g. .prostopdr.com
+  }
+
+  session_set_cookie_params($params);
+  session_start();
+}
+
 require_once __DIR__ . '/db.php';
-require_once __DIR__ . '/users_store.php';
 
-/**
- * ✅ ПІДКЛЮЧЕННЯ: ліміт 2 пристрої + 1 активна сесія
- */
-require_once __DIR__ . '/device_sessions.php';
-
+// -------------------- Helpers --------------------
 function env(string $key, ?string $default = null): ?string {
   $v = getenv($key);
   if ($v === false || $v === '') return $default;
@@ -93,63 +106,50 @@ function csrf_verify(?string $token): void {
   }
 }
 
-/**
- * ✅ ВАЖЛИВО:
- * У тебе user_id може бути UUID/хеш (string), тому тримаємо ID як string.
- */
+// -------------------- Auth --------------------
 function auth_user_id(): ?string {
-  if (!isset($_SESSION['user_id'])) return null;
-  $v = $_SESSION['user_id'];
-  if (is_int($v)) return (string)$v;
-  if (is_string($v) && $v !== '') return $v;
-  return null;
+  $id = $_SESSION['user_id'] ?? null;
+  if (!is_string($id) || $id === '') return null;
+  return $id;
 }
 
-/**
- * ✅ Генерує токен сесії (унікальний для кожного логіну),
- * щоб можна було зробити "лише 1 активний вхід".
- */
-function auth_ensure_session_token(): string {
-  if (empty($_SESSION['session_token']) || !is_string($_SESSION['session_token'])) {
-    $_SESSION['session_token'] = bin2hex(random_bytes(24));
-  }
-  return (string)$_SESSION['session_token'];
-}
-
-function auth_login(int|string $userId): void {
-  // зберігаємо як string, щоб не ламати UUID/хеші
-  $_SESSION['user_id'] = (string)$userId;
-
-  // ✅ 1 активний вхід + максимум 2 пристрої
-  $token = auth_ensure_session_token();
-  $res = ds_on_login((string)$userId, $token, 2);
-
-  if (isset($res['ok']) && $res['ok'] === false && ($res['error'] ?? '') === 'MAX_DEVICES') {
-    // якщо 3-й пристрій — блокуємо вхід
-    auth_logout();
-    redirect('/login?reason=max_devices');
-  }
-
-  auth_refresh_access();
+function auth_login(string $userId): void {
+  $_SESSION['user_id'] = $userId;
 }
 
 function auth_logout(): void {
+  unset($_SESSION['user_id'], $_SESSION['has_access'], $_SESSION['plan']);
+}
+
+// -------------------- Device policy include (once) --------------------
+$dsFile = __DIR__ . '/device_sessions.php';
+if (is_file($dsFile)) {
+  require_once $dsFile;
+}
+
+function auth_enforce_device_policy(): void {
   $uid = auth_user_id();
+  if (!$uid) return;
 
-  // ✅ прибираємо активну сесію, якщо це саме вона
-  if ($uid && !empty($_SESSION['session_token']) && is_string($_SESSION['session_token'])) {
-    ds_on_logout((string)$uid, (string)$_SESSION['session_token']);
+  if (!function_exists('ds_is_session_active')) return;
+
+  $sid = session_id();
+  if ($sid === '') return;
+
+  if (!ds_is_session_active($uid, $sid)) {
+    auth_logout();
+    redirect('/login?reason=another_device');
   }
-
-  unset($_SESSION['user_id']);
-  unset($_SESSION['has_access'], $_SESSION['plan']);
-  unset($_SESSION['session_token']);
 }
 
 /**
- * ✅ Перерахунок доступу з users.json, щоб не ловити лупи “план поставив — доступу нема”.
+ * Recalculate access from users_store (call AFTER requiring users_store.php)
  */
 function auth_refresh_access(): void {
+  if (!function_exists('user_find_by_id') || !function_exists('user_has_access')) {
+    return;
+  }
+
   $uid = auth_user_id();
   if (!$uid) {
     $_SESSION['has_access'] = false;
@@ -167,37 +167,3 @@ function auth_refresh_access(): void {
   $_SESSION['plan'] = (string)($user['plan'] ?? 'free');
   $_SESSION['has_access'] = user_has_access($user);
 }
-
-/**
- * ✅ Примусова "1 активна сесія".
- * Якщо користувач увійшов на іншому пристрої — цей сеанс вибиває.
- *
- * ВАЖЛИВО: не перевіряємо це на сторінках /login /register, щоб не зробити лупи.
- */
-(function () {
-  $uid = auth_user_id();
-  if (!$uid) return;
-
-  // якщо токена немає (старі сесії) — створюємо, але НЕ робимо login-подію
-  $token = auth_ensure_session_token();
-
-  $path = (string)($_SERVER['SCRIPT_NAME'] ?? '');
-  $uri  = (string)($_SERVER['REQUEST_URI'] ?? '');
-
-  // allowlist: де не треба вибивати/редіректити
-  $skip = false;
-  foreach (['/login', '/register', '/logout'] as $s) {
-    if (str_contains($path, $s) || str_contains($uri, $s)) { $skip = true; break; }
-  }
-  if ($skip) return;
-
-  // якщо цей токен НЕ активний — вибиваємо
-  if (!ds_is_session_active((string)$uid, $token)) {
-    // чистимо сесію повністю
-    $_SESSION = [];
-    if (session_status() === PHP_SESSION_ACTIVE) {
-      session_destroy();
-    }
-    redirect('/login?reason=another_device');
-  }
-})();

@@ -16,6 +16,13 @@ $email = trim((string)($_POST['email'] ?? ''));
 $pass  = (string)($_POST['password'] ?? '');
 $name  = trim((string)($_POST['name'] ?? ''));
 $pass2 = (string)($_POST['password_confirm'] ?? '');
+$next  = trim((string)($_POST['next'] ?? ''));
+
+// safe next (тільки внутрішні шляхи)
+$nextSafe = '';
+if ($next !== '' && str_starts_with($next, '/')) {
+  $nextSafe = $next;
+}
 
 if ($email === '' || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
   redirect('/login?err=' . rawurlencode('Вкажи коректний email'));
@@ -39,12 +46,7 @@ if ($mode === 'register') {
 
   auth_login($uid);
 
-  // sessions.json (опційно)
-  if (function_exists('session_register_current')) {
-    session_register_current($uid, 'Email register');
-  }
-
-  // device policy: 2 remembered + 1 active
+  // device policy
   if (function_exists('ds_on_login')) {
     $res = ds_on_login($uid, session_id(), 2);
     if (!($res['ok'] ?? false)) {
@@ -53,11 +55,17 @@ if ($mode === 'register') {
     }
   }
 
+  // session list (якщо є)
+  if (function_exists('session_register_current')) {
+    session_register_current($uid, 'Email register');
+  }
+
   auth_refresh_access();
-  redirect('/account/index.php');
+
+  redirect($nextSafe !== '' ? $nextSafe : '/account/index.php');
 }
 
-// ---- login ----
+// -------------------- LOGIN --------------------
 if ($pass === '') {
   redirect('/login?err=' . rawurlencode('Введи пароль'));
 }
@@ -71,19 +79,10 @@ if (!user_verify_password($user, $pass)) {
   redirect('/login?err=' . rawurlencode('Невірний пароль'));
 }
 
-$uid = (string)($user['id'] ?? '');
-if ($uid === '') {
-  redirect('/login?err=' . rawurlencode('Помилка акаунта: відсутній ID'));
-}
-
+$uid = (string)$user['id'];
 auth_login($uid);
 
-// sessions.json (опційно)
-if (function_exists('session_register_current')) {
-  session_register_current($uid, 'Email login');
-}
-
-// device policy: 2 remembered + 1 active
+// device policy
 if (function_exists('ds_on_login')) {
   $res = ds_on_login($uid, session_id(), 2);
   if (!($res['ok'] ?? false)) {
@@ -92,5 +91,10 @@ if (function_exists('ds_on_login')) {
   }
 }
 
+if (function_exists('session_register_current')) {
+  session_register_current($uid, 'Email login');
+}
+
 auth_refresh_access();
-redirect('/account/index.php');
+
+redirect($nextSafe !== '' ? $nextSafe : '/account/index.php');
