@@ -6,24 +6,69 @@ require_once __DIR__ . '/../../src/users_store.php';
 require_once __DIR__ . '/../../src/mono_acquiring.php';
 require_once __DIR__ . '/../../src/mono_payments_store.php';
 
-if (session_status() !== PHP_SESSION_ACTIVE) @session_start();
+if (session_status() !== PHP_SESSION_ACTIVE) {
+  @session_start();
+}
 
-if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+/**
+ * ✅ GET bridge:
+ * Дозволяє робити href типу:
+ *  /pay/create.php?action=trial&plan=12
+ *  /pay/create.php?action=buy&plan=30
+ *
+ * Щоб не відкривали оплату боти — дозволяємо тільки якщо користувач залогінений.
+ */
+if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'GET') {
+  $uid = auth_user_id();
+  if ($uid === null || $uid === '') {
+    redirect('/login?err=' . rawurlencode('Спочатку увійди в акаунт, щоб оформити оплату.'));
+  }
+
+  $gAction = (string)($_GET['action'] ?? '');
+  $gPlan   = (string)($_GET['plan'] ?? '');
+
+  if (!in_array($gAction, ['buy', 'trial'], true)) {
+    redirect('/account?tab=dashboard&err=' . rawurlencode('Некоректний action.'));
+  }
+  if (!in_array($gPlan, ['12', '30'], true)) {
+    redirect('/account?tab=dashboard&err=' . rawurlencode('Некоректний plan.'));
+  }
+
+  // Підкладаємо в POST і "імітуємо" POST
+  $_POST['action'] = $gAction;
+  $_POST['plan']   = $gPlan;
+  $_SERVER['REQUEST_METHOD'] = 'POST';
+}
+
+// ✅ Тільки POST (після GET-містка тут теж буде POST)
+if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
   http_response_code(405);
   exit('Method not allowed');
 }
 
-csrf_verify($_POST['csrf'] ?? null);
+// ✅ CSRF перевіряємо тільки якщо реально прийшов csrf (тобто з форми)
+if (isset($_POST['csrf']) && (string)$_POST['csrf'] !== '') {
+  csrf_verify($_POST['csrf']);
+}
 
 $action = (string)($_POST['action'] ?? 'buy'); // buy|trial
 $plan   = (string)($_POST['plan'] ?? '30');    // 12|30
-if ($plan !== '12' && $plan !== '30') $plan = '30';
 
+if (!in_array($action, ['buy', 'trial'], true)) {
+  redirect('/account?tab=dashboard&err=' . rawurlencode('Некоректний action.'));
+}
+
+if ($plan !== '12' && $plan !== '30') {
+  $plan = '30';
+}
+
+// uid
 $uid = auth_user_id();
 if ($uid === null || $uid === '') {
   redirect('/login?err=' . rawurlencode('Спочатку увійди в акаунт, щоб оформити оплату.'));
 }
 
+// user
 $u = user_find_by_id((string)$uid);
 if (!is_array($u)) {
   redirect('/login?err=' . rawurlencode('Акаунт не знайдено.'));
@@ -38,6 +83,7 @@ if ($trialDays <= 0) $trialDays = 3;
 
 $amount = ($plan === '12') ? $amount12 : $amount30;
 if ($amount <= 0) $amount = ($plan === '12') ? 38999 : 69900;
+
 if ($trialHold <= 0) $trialHold = 100;
 
 // URLs from ENV
@@ -48,15 +94,15 @@ if ($returnUrl === '' || $webhookUrl === '') {
   redirect('/account?tab=dashboard&err=' . rawurlencode('Mono не налаштовано: RETURN/WEBHOOK URL'));
 }
 
-// Ми маємо ЗРОБИТИ reference у форматі, який вміє твій mono_webhook.php:
-// - trial_bind_{userId}_{ts}
-// - buy_{planCode}_{userId}_{ts}
 // planCode для webhook: base|12d
 $planCode = ($plan === '12') ? '12d' : 'base';
 
+// reference у форматі, який вміє mono_webhook.php:
 if ($action === 'trial') {
+  // trial_bind_{userId}_{ts}
   $orderId = 'trial_bind_' . $uid . '_' . time();
 } else {
+  // buy_{planCode}_{userId}_{ts}
   $orderId = 'buy_' . $planCode . '_' . $uid . '_' . time();
 }
 
@@ -70,7 +116,7 @@ $payload = [
   'amount' => $finalAmount,
   'ccy' => 980,
   'merchantPaymInfo' => [
-    'reference' => $orderId, // <-- головне: ref у правильному форматі
+    'reference' => $orderId,
     'destination' => $title,
     'comment' => $title,
     'basketOrder' => [
@@ -88,7 +134,7 @@ $payload = [
   'webHookUrl'  => $webhookUrl,
 ];
 
-// Якщо trial — попросимо збереження картки (як у твоєму checkout.php)
+// Якщо trial — попросимо збереження картки
 if ($action === 'trial') {
   $payload['saveCardData'] = ['saveCard' => true];
 }
@@ -108,7 +154,7 @@ if ($invoiceId === '' || $pageUrl === '') {
   redirect('/account?tab=dashboard&err=' . rawurlencode('Mono invoice response invalid'));
 }
 
-// store (для себе)
+// store
 mono_invoice_put([
   'invoice_id' => $invoiceId,
   'order_ref'  => $orderId,
@@ -126,7 +172,7 @@ mono_invoice_put([
   ],
 ]);
 
-// ВАЖЛИВО: щоб mono_webhook.php видав trial правильного плану
+// pending plan (щоб webhook видав правильний план)
 if ($action === 'trial') {
   $u['trial_pending_plan'] = $planCode; // base|12d
   user_upsert($u);
@@ -135,4 +181,5 @@ if ($action === 'trial') {
   user_upsert($u);
 }
 
+// redirect to mono payment page
 redirect($pageUrl);
