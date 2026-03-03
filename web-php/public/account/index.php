@@ -18,9 +18,6 @@ auth_enforce_device_policy();
 
 // Далі — ТВОЯ ОРИГІНАЛЬНА ЛОГІКА/HTML/СТИЛІ без змін
 
-if (is_file($bootstrap)) require_once $bootstrap;
-if (is_file($usersStore)) require_once $usersStore;
-
 if (session_status() !== PHP_SESSION_ACTIVE) {
   @session_start();
 }
