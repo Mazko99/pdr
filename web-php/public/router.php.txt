@@ -13,7 +13,22 @@ $path = is_string($path) ? $path : '/';
 $publicDir = __DIR__;
 $clean = '/' . ltrim($path, '/');
 
-// 1) If file exists in /public -> serve it directly
+// ---- Security: block path traversal ----
+if (str_contains($clean, "\0") || str_contains($clean, '..')) {
+  http_response_code(400);
+  header('Content-Type: text/plain; charset=utf-8');
+  echo "400 bad path\n";
+  exit;
+}
+
+// 0) ✅ MOST IMPORTANT FIX:
+// If the exact file exists in /public -> serve it directly (works for /pay/create.php, /pay/ping.php, etc.)
+$direct = $publicDir . $clean;
+if ($clean !== '/' && is_file($direct)) {
+  return false; // let PHP serve the real file
+}
+
+// 1) If file exists in /public -> serve it directly (your original realpath-based safety check)
 $full = realpath($publicDir . $clean);
 if ($full !== false) {
   $pubReal = realpath($publicDir);
