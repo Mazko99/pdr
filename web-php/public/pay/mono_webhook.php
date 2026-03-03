@@ -18,10 +18,36 @@ $logFile = $logDir . '/mono_webhook.log';
 
 function log_line(string $file, string $line): void {
   $msg = "[" . date('c') . "] " . $line;
-  // в Railway логи (важливо!)
   error_log("MONO_WEBHOOK " . $msg);
-  // в файл (якщо вийде)
   @file_put_contents($file, $msg . "\n", FILE_APPEND);
+}
+
+function norm_plan(string $p): string {
+  $p = trim(strtolower($p));
+  $map = [
+    '30' => 'base',
+    '30d' => 'base',
+    'base' => 'base',
+
+    '12' => '12d',
+    '12d' => '12d',
+    'personal' => '12d',   // якщо твій 12-денний план називається personal у checkout
+    'trial12' => '12d',
+  ];
+  return $map[$p] ?? $p;
+}
+
+function extract_user_id_from_ref(string $ref): string {
+  // шукаємо найбільш схоже на id користувача (цифри або uuid-подібне)
+  // 1) якщо у тебе id цифрами
+  if (preg_match('~(?:^|_)(\d{1,20})(?:_|$)~', $ref, $m)) {
+    return (string)$m[1];
+  }
+  // 2) якщо колись зробиш uuid — витягне теж
+  if (preg_match('~(?:^|_)([a-f0-9]{8,})(?:_|$)~i', $ref, $m2)) {
+    return (string)$m2[1];
+  }
+  return '';
 }
 
 // === GET тест (браузер) ===
@@ -86,24 +112,49 @@ $userId = '';
 $mode = '';
 $plan = '';
 
+// --- РОЗШИРЕНИЙ ПАРСИНГ reference ---
+// підтримуємо твої формати + запасні
+// 1) buy_{plan}_{userId}_{ts}
 if (str_starts_with($ref, 'buy_')) {
-  // buy_{plan}_{userId}_{ts}
   $mode = 'buy';
-  $parts = explode('_', $ref, 4);
+  $parts = explode('_', $ref);
   $plan = (string)($parts[1] ?? '');
   $userId = (string)($parts[2] ?? '');
-} elseif (str_starts_with($ref, 'trial_bind_')) {
-  // trial_bind_{userId}_{ts}
+}
+
+// 2) trial_bind_{userId}_{ts}
+elseif (str_starts_with($ref, 'trial_bind_')) {
   $mode = 'trial';
-  $parts = explode('_', $ref, 4);
+  $parts = explode('_', $ref);
   $userId = (string)($parts[2] ?? '');
-} elseif (str_starts_with($ref, 'trial_charge_')) {
-  // trial_charge_{plan}_{userId}_{ts}
+}
+
+// 3) trial_charge_{plan}_{userId}_{ts}
+elseif (str_starts_with($ref, 'trial_charge_')) {
   $mode = 'trial_charge';
-  $parts = explode('_', $ref, 5);
+  $parts = explode('_', $ref);
   $plan = (string)($parts[2] ?? '');
   $userId = (string)($parts[3] ?? '');
 }
+
+// 4) fallback: якщо ref типу trial_{plan}_{userId}_{ts} або checkout_{...}
+elseif (str_contains($ref, 'trial')) {
+  // пробуємо витягнути userId з рядка
+  $mode = 'trial';
+  $userId = extract_user_id_from_ref($ref);
+  // пробуємо витягнути план як base/personal/12/30 якщо він є в ref
+  if (preg_match('~(?:^|_)(base|personal|12d|12|30|30d)(?:_|$)~i', $ref, $m)) {
+    $plan = (string)$m[1];
+  }
+}
+elseif (str_contains($ref, 'checkout') || str_contains($ref, 'order')) {
+  // краще хоч так, ніж нуль
+  $userId = extract_user_id_from_ref($ref);
+  if ($userId !== '') $mode = 'buy'; // або trial — якщо в ref є trial, але вище вже зловили
+}
+
+// нормалізуємо plan
+$plan = norm_plan($plan);
 
 log_line($logFile, "MODE={$mode} userId={$userId} plan={$plan}");
 
@@ -131,7 +182,7 @@ if (!is_array($u)) {
 $okBuy   = ['success', 'processed', 'ok'];
 $okTrial = ['success', 'processed', 'ok', 'hold', 'processing'];
 
-if ($mode === 'trial') {
+if ($mode === 'trial' || $mode === 'trial_charge') {
   if (!in_array($status, $okTrial, true)) {
     log_line($logFile, "EXIT: TRIAL status not ok ({$status})");
     http_response_code(200);
@@ -150,6 +201,7 @@ if ($mode === 'trial') {
 // BUY
 if ($mode === 'buy') {
   $chosen = $plan !== '' ? $plan : (string)($u['buy_pending_plan'] ?? 'base');
+  $chosen = norm_plan($chosen);
 
   if ($chosen === '12d') {
     $u['plan'] = '12d';
@@ -171,9 +223,13 @@ if ($mode === 'buy') {
   exit;
 }
 
-// TRIAL
+// TRIAL (включно з fallback trial_...)
 if ($mode === 'trial') {
   $pendingPlan = (string)($u['trial_pending_plan'] ?? 'base');
+  $pendingPlan = norm_plan($pendingPlan);
+
+  // якщо webhook приніс plan — використовуємо його
+  if ($plan !== '') $pendingPlan = norm_plan($plan);
 
   $u['trial_used'] = true;
   $u['trial_started_at'] = (string)($u['trial_started_at'] ?? gmdate('c'));
@@ -197,7 +253,7 @@ if ($mode === 'trial') {
   exit;
 }
 
-// trial_charge — ack
+// trial_charge — просто ack (поки не використовуємо)
 log_line($logFile, "TRIAL_CHARGE ACK");
 http_response_code(200);
 echo 'ok';
