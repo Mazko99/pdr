@@ -11,6 +11,13 @@ if (session_status() !== PHP_SESSION_ACTIVE) {
 
 $raw = (string)file_get_contents('php://input');
 
+// === LOGS (щоб точно бачити що прилітає з mono) ===
+$logDir = dirname(__DIR__, 2) . '/storage';
+if (!is_dir($logDir)) {
+  @mkdir($logDir, 0775, true);
+}
+@file_put_contents($logDir . '/mono_webhook.log', "[" . date('c') . "] RAW: " . $raw . "\n", FILE_APPEND);
+
 // зберемо хедери
 $headers = [];
 foreach ($_SERVER as $k => $v) {
@@ -41,11 +48,21 @@ $amount    = (int)($data['amount'] ?? 0);
 // cardToken може бути в залежності від режиму (токенізація)
 $cardToken = (string)($data['cardToken'] ?? '');
 
-// reference інколи лежить тут/там
+// === ВАЖЛИВО: reference може бути пустий. Тоді беремо orderId. ===
 $ref = (string)($data['reference'] ?? '');
-if ($ref === '') {
+if ($ref === '') $ref = (string)($data['orderId'] ?? '');
+
+if ($ref === '' && isset($data['merchantPaymInfo']) && is_array($data['merchantPaymInfo'])) {
   $ref = (string)($data['merchantPaymInfo']['reference'] ?? '');
+  if ($ref === '') $ref = (string)($data['merchantPaymInfo']['orderId'] ?? '');
 }
+
+// залогуємо ref/status для дебагу
+@file_put_contents(
+  $logDir . '/mono_webhook.log',
+  "[" . date('c') . "] status={$status} invoiceId={$invoiceId} amount={$amount} ref={$ref}\n",
+  FILE_APPEND
+);
 
 $userId = '';
 $mode = '';
@@ -85,8 +102,10 @@ if (!is_array($u)) {
   exit;
 }
 
-// Обробляємо тільки success
-if ($status !== 'success') {
+// === Обробляємо тільки успішні статуси ===
+// інколи mono може віддати processed/ok залежно від флоу
+$okStatuses = ['success', 'processed', 'ok'];
+if (!in_array($status, $okStatuses, true)) {
   http_response_code(200);
   echo 'ok';
   exit;
