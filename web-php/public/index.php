@@ -452,7 +452,7 @@ $isAdminUi = !empty($_SESSION['is_admin']) && $_SESSION['is_admin'] === true;
 
       <div class="header__actions">
         <?php if (!$isAuthed): ?>
-          <a class="btn btn--ghost header__cta-hide-mobile header__trial" href="#demo">Тестовий доступ на 3 дні</a>
+          <a class="btn btn--ghost header__cta-hide-mobile header__trial" href="/login/index.php">Тестовий доступ на 3 дні</a>
           <a class="btn btn--primary header__cta-hide-mobile" href="/login">увійти</a>
         <?php else: ?>
           <button class="userpill" type="button" data-user-menu-btn aria-label="Профіль">
@@ -658,8 +658,8 @@ $isAdminUi = !empty($_SESSION['is_admin']) && $_SESSION['is_admin'] === true;
               </ul>
 
               <div class="plan__cta-row">
-                <a class="btn btn--ghost plan__cta" href="/demo">Отримати 3 дні безкоштовно</a>
-                <a class="btn btn--primary plan__cta" href="/checkout?plan=basic">Обрати</a>
+                <a class="btn btn--ghost plan__cta" href="/login/index.php">Отримати 3 дні безкоштовно</a>
+                <a class="btn btn--primary plan__cta" href="/login/index.php">Обрати</a>
               </div>
             </article>
 
@@ -689,8 +689,8 @@ $isAdminUi = !empty($_SESSION['is_admin']) && $_SESSION['is_admin'] === true;
               </ul>
 
               <div class="plan__cta-row">
-                <a class="btn btn--ghost plan__cta" href="/demo">Отримати 3 дні безкоштовно</a>
-                <a class="btn btn--primary plan__cta" href="/checkout?plan=mini12">Обрати</a>
+                <a class="btn btn--ghost plan__cta" href="/login/index.php">Отримати 3 дні безкоштовно</a>
+                <a class="btn btn--primary plan__cta" href="/login/index.php">Обрати</a>
               </div>
             </article>
           </div>
@@ -821,7 +821,7 @@ $isAdminUi = !empty($_SESSION['is_admin']) && $_SESSION['is_admin'] === true;
           <p class="demo__text">
             Хочеш спробувати платформу перед оплатою? Активуй <b>тестовий доступ на 3 дні</b> і пройди тренування безкоштовно.
           </p>
-          <a class="btn btn--xl btn--primary" href="/demo">Тестовий доступ на 3 дні</a>
+          <a class="btn btn--xl btn--primary" href="/login/index.php">Тестовий доступ на 3 дні</a>
         </div>
 
         <h2 class="h2">Хочеш готуватися як на реальному іспиті?</h2>
@@ -833,7 +833,7 @@ $isAdminUi = !empty($_SESSION['is_admin']) && $_SESSION['is_admin'] === true;
               <div class="exam-date__value">30–60 хв щодня + повторення помилок</div>
             </div>
           </div>
-          <a class="btn btn--xl btn--accent" href="#pricing">Почати</a>
+          <a class="btn btn--xl btn--accent" href="/login/index.php">Почати</a>
         </div>
       </div>
     </section>
