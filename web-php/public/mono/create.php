@@ -10,80 +10,46 @@ if (session_status() !== PHP_SESSION_ACTIVE) {
   @session_start();
 }
 
-/**
- * ✅ GET bridge:
- * Дозволяє робити href типу:
- *  /pay/create.php?action=trial&plan=12
- *  /pay/create.php?action=buy&plan=30
- *
- * Щоб не відкривали оплату боти — дозволяємо тільки якщо користувач залогінений.
- */
-if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'GET') {
-  $uid = auth_user_id();
-  if ($uid === null || $uid === '') {
-    redirect('/login?err=' . rawurlencode('Спочатку увійди в акаунт, щоб оформити оплату.'));
-  }
-
-  $gAction = (string)($_GET['action'] ?? '');
-  $gPlan   = (string)($_GET['plan'] ?? '');
-
-  if (!in_array($gAction, ['buy', 'trial'], true)) {
-    redirect('/account?tab=dashboard&err=' . rawurlencode('Некоректний action.'));
-  }
-  if (!in_array($gPlan, ['12', '30'], true)) {
-    redirect('/account?tab=dashboard&err=' . rawurlencode('Некоректний plan.'));
-  }
-
-  // Підкладаємо в POST і "імітуємо" POST
-  $_POST['action'] = $gAction;
-  $_POST['plan']   = $gPlan;
-  $_SERVER['REQUEST_METHOD'] = 'POST';
-}
-
-// ✅ Тільки POST (після GET-містка тут теж буде POST)
-if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
+// ✅ ENDPOINT ONLY: POST
+if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'POST') {
   http_response_code(405);
-  exit('Method not allowed');
+  header('Content-Type: text/plain; charset=utf-8');
+  echo "Method not allowed. Use POST.\n";
+  exit;
 }
 
-// ✅ CSRF перевіряємо тільки якщо реально прийшов csrf (тобто з форми)
-if (isset($_POST['csrf']) && (string)$_POST['csrf'] !== '') {
-  csrf_verify($_POST['csrf']);
-}
+// CSRF
+csrf_verify($_POST['csrf'] ?? null);
 
-$action = (string)($_POST['action'] ?? 'buy'); // buy|trial
-$plan   = (string)($_POST['plan'] ?? '30');    // 12|30
+// action: buy|trial
+$action = (string)($_POST['action'] ?? 'buy');
+if ($action !== 'buy' && $action !== 'trial') $action = 'buy';
 
-if (!in_array($action, ['buy', 'trial'], true)) {
-  redirect('/account?tab=dashboard&err=' . rawurlencode('Некоректний action.'));
-}
+// plan: 12|30
+$plan = (string)($_POST['plan'] ?? '30');
+if ($plan !== '12' && $plan !== '30') $plan = '30';
 
-if ($plan !== '12' && $plan !== '30') {
-  $plan = '30';
-}
-
-// uid
+// auth
 $uid = auth_user_id();
 if ($uid === null || $uid === '') {
   redirect('/login?err=' . rawurlencode('Спочатку увійди в акаунт, щоб оформити оплату.'));
 }
 
-// user
 $u = user_find_by_id((string)$uid);
 if (!is_array($u)) {
   redirect('/login?err=' . rawurlencode('Акаунт не знайдено.'));
 }
 
 // amounts in kop
-$amount12  = (int)getenv('PLAN_12_AMOUNT');
-$amount30  = (int)getenv('PLAN_30_AMOUNT');
-$trialHold = (int)getenv('TRIAL_HOLD_AMOUNT');
+$amount12  = (int)getenv('PLAN_12_AMOUNT');   // e.g. 38999
+$amount30  = (int)getenv('PLAN_30_AMOUNT');   // e.g. 69900
+$trialHold = (int)getenv('TRIAL_HOLD_AMOUNT'); // e.g. 100
 $trialDays = (int)getenv('TRIAL_DAYS');
 if ($trialDays <= 0) $trialDays = 3;
 
+// fallback defaults
 $amount = ($plan === '12') ? $amount12 : $amount30;
 if ($amount <= 0) $amount = ($plan === '12') ? 38999 : 69900;
-
 if ($trialHold <= 0) $trialHold = 100;
 
 // URLs from ENV
@@ -91,32 +57,37 @@ $returnUrl  = mono_env('MONO_RETURN_URL', '');
 $webhookUrl = mono_env('MONO_WEBHOOK_URL', '');
 
 if ($returnUrl === '' || $webhookUrl === '') {
-  redirect('/account?tab=dashboard&err=' . rawurlencode('Mono не налаштовано: RETURN/WEBHOOK URL'));
+  redirect('/account/index.php?tab=dashboard&err=' . rawurlencode('Mono не налаштовано: MONO_RETURN_URL / MONO_WEBHOOK_URL'));
 }
 
-// planCode для webhook: base|12d
-$planCode = ($plan === '12') ? '12d' : 'base';
+/**
+ * ✅ IMPORTANT: unify plan codes across your project
+ * - 30 days -> basic
+ * - 12 days -> mini12
+ * (because your account/plan.php expects these codes)
+ */
+$planKey = ($plan === '12') ? 'mini12' : 'basic';
 
-// reference у форматі, який вміє mono_webhook.php:
+// ✅ reference format (unique)
+$ts = time();
 if ($action === 'trial') {
-  // trial_bind_{userId}_{ts}
-  $orderId = 'trial_bind_' . $uid . '_' . time();
+  $orderRef = 'trial_bind_' . $uid . '_' . $ts;
 } else {
-  // buy_{planCode}_{userId}_{ts}
-  $orderId = 'buy_' . $planCode . '_' . $uid . '_' . time();
+  $orderRef = 'buy_' . $planKey . '_' . $uid . '_' . $ts;
 }
 
 $title = ($action === 'trial')
-  ? ('Тріал ' . $trialDays . ' дні + прив’язка картки (1 грн) — План ' . $plan)
-  : ('Оплата плану ' . $plan);
+  ? ('Тріал ' . $trialDays . ' дні + прив’язка картки — ' . ($planKey === 'mini12' ? 'План 12 днів' : 'Базовий план'))
+  : ('Оплата: ' . ($planKey === 'mini12' ? 'План 12 днів' : 'Базовий план'));
 
+// trial -> hold amount, buy -> plan amount
 $finalAmount = ($action === 'trial') ? $trialHold : $amount;
 
 $payload = [
   'amount' => $finalAmount,
   'ccy' => 980,
   'merchantPaymInfo' => [
-    'reference' => $orderId,
+    'reference' => $orderRef,
     'destination' => $title,
     'comment' => $title,
     'basketOrder' => [
@@ -124,43 +95,44 @@ $payload = [
         'name' => $title,
         'qty' => 1,
         'sum' => $finalAmount,
-        'code' => $plan,
+        'code' => $planKey,
         'icon' => '',
         'unit' => 'шт',
       ]
     ],
   ],
-  'redirectUrl' => $returnUrl . '&invoice=' . rawurlencode($orderId),
+  'redirectUrl' => $returnUrl . (str_contains($returnUrl, '?') ? '&' : '?') . 'invoice=' . rawurlencode($orderRef),
   'webHookUrl'  => $webhookUrl,
 ];
 
-// Якщо trial — попросимо збереження картки
+// If trial — save card
 if ($action === 'trial') {
   $payload['saveCardData'] = ['saveCard' => true];
 }
 
 // create invoice
-$res = mono_create_invoice($payload);
+$res  = mono_create_invoice($payload);
 $code = (int)($res['code'] ?? 0);
+
 if ($code < 200 || $code >= 300) {
-  redirect('/account?tab=dashboard&err=' . rawurlencode('Mono create invoice error'));
+  redirect('/account/index.php?tab=dashboard&err=' . rawurlencode('Mono create invoice error (HTTP ' . $code . ')'));
 }
 
-$data = (array)($res['data'] ?? []);
+$data      = (array)($res['data'] ?? []);
 $invoiceId = (string)($data['invoiceId'] ?? '');
 $pageUrl   = (string)($data['pageUrl'] ?? '');
 
 if ($invoiceId === '' || $pageUrl === '') {
-  redirect('/account?tab=dashboard&err=' . rawurlencode('Mono invoice response invalid'));
+  redirect('/account/index.php?tab=dashboard&err=' . rawurlencode('Mono invoice response invalid'));
 }
 
-// store
+// store invoice locally
 mono_invoice_put([
   'invoice_id' => $invoiceId,
-  'order_ref'  => $orderId,
+  'order_ref'  => $orderRef,
   'user_id'    => (string)$uid,
   'kind'       => ($action === 'trial') ? 'trial_hold' : 'plan_buy',
-  'plan'       => $planCode, // base|12d
+  'plan'       => $planKey, // basic|mini12
   'amount'     => $finalAmount,
   'status'     => 'created',
   'created_at' => gmdate('c'),
@@ -172,15 +144,14 @@ mono_invoice_put([
   ],
 ]);
 
-// pending plan (щоб webhook видав правильний план)
+// ✅ pending plan for webhook to apply (NO base/12d!)
 if ($action === 'trial') {
-  $u['trial_pending_plan'] = $planCode; // base|12d
+  $u['trial_pending_plan'] = $planKey; // basic|mini12
   user_upsert($u);
 } else {
-  $u['buy_pending_plan'] = $planCode; // base|12d
+  $u['buy_pending_plan'] = $planKey;   // basic|mini12
   user_upsert($u);
 }
 
-// redirect to mono payment page
-header('Location: ' . $pageUrl, true, 302);
-exit;
+// redirect to mono checkout page
+redirect($pageUrl);
