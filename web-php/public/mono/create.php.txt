@@ -182,4 +182,5 @@ if ($action === 'trial') {
 }
 
 // redirect to mono payment page
-redirect($pageUrl);
+header('Location: ' . $pageUrl, true, 302);
+exit;
