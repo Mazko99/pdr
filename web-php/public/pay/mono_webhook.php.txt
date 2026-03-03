@@ -17,21 +17,21 @@ if (!is_dir($logDir)) {
 $logFile = $logDir . '/mono_webhook.log';
 
 function log_line(string $file, string $line): void {
-  if (!@file_put_contents($file, "[" . date('c') . "] " . $line . "\n", FILE_APPEND)) {
-    error_log("mono_webhook: cannot write log file: " . $file);
-    error_log("mono_webhook: " . $line);
-  }
+  $msg = "[" . date('c') . "] " . $line;
+  // в Railway логи (важливо!)
+  error_log("MONO_WEBHOOK " . $msg);
+  // в файл (якщо вийде)
+  @file_put_contents($file, $msg . "\n", FILE_APPEND);
 }
 
 // === GET тест (браузер) ===
 if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'GET') {
-  log_line($logFile, "GET ping from " . ($_SERVER['REMOTE_ADDR'] ?? 'unknown'));
+  log_line($logFile, "GET ping uri=" . ($_SERVER['REQUEST_URI'] ?? '') . " ip=" . ($_SERVER['REMOTE_ADDR'] ?? 'unknown'));
   http_response_code(200);
   echo 'OK (GET)';
   exit;
 }
 
-// Тільки POST для mono
 if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
   log_line($logFile, "Method not allowed: " . ($_SERVER['REQUEST_METHOD'] ?? 'unknown'));
   http_response_code(405);
@@ -40,9 +40,9 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
 }
 
 $raw = (string)file_get_contents('php://input');
-log_line($logFile, "RAW: " . $raw);
+log_line($logFile, "RAW=" . $raw);
 
-// зберемо хедери
+// headers
 $headers = [];
 foreach ($_SERVER as $k => $v) {
   if (str_starts_with($k, 'HTTP_')) {
@@ -59,7 +59,7 @@ if (!is_array($data)) {
   exit;
 }
 
-// (Опційно) верифікація підпису (рекомендовано)
+// (опційно) signature verify
 // if (!mono_verify_webhook($raw, $headers)) {
 //   log_line($logFile, "BAD SIGNATURE");
 //   http_response_code(403);
@@ -72,16 +72,15 @@ $invoiceId = (string)($data['invoiceId'] ?? '');
 $amount    = (int)($data['amount'] ?? 0);
 $cardToken = (string)($data['cardToken'] ?? '');
 
-// reference/orderId можуть приходити по-різному
+// reference/orderId fallback
 $ref = (string)($data['reference'] ?? '');
 if ($ref === '') $ref = (string)($data['orderId'] ?? '');
-
 if ($ref === '' && isset($data['merchantPaymInfo']) && is_array($data['merchantPaymInfo'])) {
   $ref = (string)($data['merchantPaymInfo']['reference'] ?? '');
   if ($ref === '') $ref = (string)($data['merchantPaymInfo']['orderId'] ?? '');
 }
 
-log_line($logFile, "status={$status} invoiceId={$invoiceId} amount={$amount} ref={$ref}");
+log_line($logFile, "PARSED status={$status} invoiceId={$invoiceId} amount={$amount} ref={$ref}");
 
 $userId = '';
 $mode = '';
@@ -106,8 +105,10 @@ if (str_starts_with($ref, 'buy_')) {
   $userId = (string)($parts[3] ?? '');
 }
 
+log_line($logFile, "MODE={$mode} userId={$userId} plan={$plan}");
+
 if ($userId === '') {
-  log_line($logFile, "NO USERID parsed from ref: " . $ref);
+  log_line($logFile, "EXIT: NO USERID");
   http_response_code(200);
   echo 'ok';
   exit;
@@ -115,22 +116,38 @@ if ($userId === '') {
 
 $u = user_find_by_id($userId);
 if (!is_array($u)) {
-  log_line($logFile, "USER NOT FOUND id=" . $userId);
+  log_line($logFile, "EXIT: USER NOT FOUND id={$userId}");
   http_response_code(200);
   echo 'ok';
   exit;
 }
 
-// Успішні статуси (у різних флоу можуть відрізнятись)
-$okStatuses = ['success', 'processed', 'ok'];
-if (!in_array($status, $okStatuses, true)) {
-  log_line($logFile, "NOT OK STATUS: " . $status);
-  http_response_code(200);
-  echo 'ok';
-  exit;
+/**
+ * ВАЖЛИВО:
+ * Для прив'язки (trial_hold 1 грн) mono часто шле статус не тільки "success".
+ * Тому для TRIAL дозволяємо: success/processed/ok/hold/processing
+ * Для BUY краще лишити тільки success/processed/ok.
+ */
+$okBuy   = ['success', 'processed', 'ok'];
+$okTrial = ['success', 'processed', 'ok', 'hold', 'processing'];
+
+if ($mode === 'trial') {
+  if (!in_array($status, $okTrial, true)) {
+    log_line($logFile, "EXIT: TRIAL status not ok ({$status})");
+    http_response_code(200);
+    echo 'ok';
+    exit;
+  }
+} else {
+  if (!in_array($status, $okBuy, true)) {
+    log_line($logFile, "EXIT: BUY status not ok ({$status})");
+    http_response_code(200);
+    echo 'ok';
+    exit;
+  }
 }
 
-// BUY: видати доступ одразу
+// BUY
 if ($mode === 'buy') {
   $chosen = $plan !== '' ? $plan : (string)($u['buy_pending_plan'] ?? 'base');
 
@@ -148,13 +165,13 @@ if ($mode === 'buy') {
 
   user_upsert($u);
 
-  log_line($logFile, "BUY OK user={$userId} plan={$u['plan']} expires_at={$u['expires_at']}");
+  log_line($logFile, "BUY OK -> plan={$u['plan']} expires_at={$u['expires_at']}");
   http_response_code(200);
   echo 'ok';
   exit;
 }
 
-// TRIAL: привʼязали карту → відкриваємо trial + зберігаємо cardToken
+// TRIAL
 if ($mode === 'trial') {
   $pendingPlan = (string)($u['trial_pending_plan'] ?? 'base');
 
@@ -163,7 +180,6 @@ if ($mode === 'trial') {
   $u['trial_expires_at'] = gmdate('c', time() + 3 * 86400);
   $u['trial_cancelled'] = false;
 
-  // доступ на 3 дні
   $u['plan'] = $pendingPlan;
   $u['expires_at'] = (string)$u['trial_expires_at'];
 
@@ -175,14 +191,14 @@ if ($mode === 'trial') {
 
   user_upsert($u);
 
-  log_line($logFile, "TRIAL OK user={$userId} plan={$u['plan']} trial_expires_at={$u['trial_expires_at']}");
+  log_line($logFile, "TRIAL OK -> plan={$u['plan']} trial_expires_at={$u['trial_expires_at']}");
   http_response_code(200);
   echo 'ok';
   exit;
 }
 
-// trial_charge — просто ack
-log_line($logFile, "TRIAL_CHARGE ACK user={$userId} plan={$plan}");
+// trial_charge — ack
+log_line($logFile, "TRIAL_CHARGE ACK");
 http_response_code(200);
 echo 'ok';
 exit;
