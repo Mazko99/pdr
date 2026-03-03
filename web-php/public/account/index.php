@@ -647,7 +647,7 @@ $sessions = function_exists('sessions_list_for_user') ? sessions_list_for_user($
             </div>
             <?php if ($mistakesCount === 0): ?>
               <div class="lock-note" style="margin-top:12px;">
-                Поки що помилок немає. Вони з’являться після проходження тестів (коли відповіси неправильно).
+                Поки що помилок немає. Вони з’являться після проходження тестів (коли ви дасте невірну відповідь ).
               </div>
             <?php endif; ?>
           </div>
