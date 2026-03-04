@@ -9,48 +9,20 @@ if (session_status() !== PHP_SESSION_ACTIVE) @session_start();
 
 function h($v): string { return htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8'); }
 
-function users_json_path(): string {
-  return __DIR__ . '/../../storage/users.json';
-}
-
-function load_users_list(): array {
-  $path = users_json_path();
-  if (!is_file($path)) return [];
-
-  $raw = file_get_contents($path);
-  if ($raw === false) return [];
-
-  if (strncmp($raw, "\xEF\xBB\xBF", 3) === 0) $raw = substr($raw, 3);
-
-  $data = json_decode($raw, true);
-  if (!is_array($data)) return [];
-
-  if (isset($data['users']) && is_array($data['users'])) {
-    $out = [];
-    foreach ($data['users'] as $u) if (is_array($u)) $out[] = $u;
-    return $out;
-  }
-
-  $isList = array_keys($data) === range(0, count($data) - 1);
-  if ($isList) {
-    $out = [];
-    foreach ($data as $u) if (is_array($u)) $out[] = $u;
-    return $out;
-  }
-
-  $out = [];
-  foreach ($data as $u) if (is_array($u)) $out[] = $u;
-  return $out;
-}
-
 function fmt(?string $iso): string {
   $iso = trim((string)$iso);
-  if ($iso === '' || $iso === 'null') return '—';
+  if ($iso === '' || strtolower($iso) === 'null') return '—';
   return $iso;
 }
 
-$users = load_users_list();
+/**
+ * ✅ Беремо користувачів з Postgres через users_store.php
+ */
+$users = users_all();
 
+/**
+ * ✅ Пошук як був (id/email/name)
+ */
 $q = trim((string)($_GET['q'] ?? ''));
 if ($q !== '') {
   $qq = mb_strtolower($q);
@@ -84,7 +56,7 @@ $unreadTotal = chat_admin_unread_total();
     .admin-table th,.admin-table td{padding:12px 12px;border-bottom:1px solid rgba(11,27,20,.08);text-align:left;white-space:nowrap}
     .admin-table th{font-weight:900}
     .admin-card{overflow:auto}
-    .admin-badge{display:inline-flex;min-width:22px;height:22px;padding:0 8px;border-radius:999px;background:#0a7a3d;color:#fff;align-items:center;justify-content:center;font-weight:900;font-size:12px}
+    .admin-badge{display:inline-flex;min-width:22px;height:22px;padding:0 8px;border-radius:999px;background:#0a7a3d;color:#fff;align-items:center;justify-content:center;font-weight:900;font-size:12px;margin-left:8px}
     .admin-search{padding:10px 12px;border-radius:12px;border:1px solid rgba(11,27,20,.18);min-width:260px;font-weight:800}
     .pill{display:inline-flex;padding:6px 10px;border-radius:999px;border:1px solid rgba(11,27,20,.12);background:#fff;font-weight:900;font-size:12px}
     .muted{opacity:.7;font-weight:800}
@@ -104,7 +76,9 @@ $unreadTotal = chat_admin_unread_total();
         <div class="admin-actions">
           <a class="btn btn--primary" href="/admin/chat.php">
             Чати
-            <?php if ($unreadTotal > 0): ?><span class="admin-badge"><?= (int)$unreadTotal ?></span><?php endif; ?>
+            <?php if ($unreadTotal > 0): ?>
+              <span class="admin-badge"><?= (int)$unreadTotal ?></span>
+            <?php endif; ?>
           </a>
 
           <form method="get" style="display:flex; gap:10px; align-items:center; margin:0;">
@@ -144,6 +118,7 @@ $unreadTotal = chat_admin_unread_total();
               </td>
             </tr>
           <?php endforeach; ?>
+
           <?php if (empty($users)): ?>
             <tr><td colspan="7" class="muted">Нічого не знайдено.</td></tr>
           <?php endif; ?>
