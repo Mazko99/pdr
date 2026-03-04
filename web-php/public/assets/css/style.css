@@ -1611,3 +1611,59 @@ body.quiz-page .tests-topbar {
 .plan__cta-row button{
   min-height:44px;
 }
+/* =========================================================
+   FIX: Mobile quiz answers text + numbers not visible
+   ========================================================= */
+@media (max-width: 768px) {
+  /* Усе, що всередині блоку варіантів — робимо читабельним */
+  .quiz .answers,
+  .quiz .answers * ,
+  .quiz .options,
+  .quiz .options * ,
+  .quiz .variants,
+  .quiz .variants * ,
+  .quiz .answer,
+  .quiz .answer * ,
+  .quiz .option,
+  .quiz .option * ,
+  .quiz .variant,
+  .quiz .variant * ,
+  .quiz .choice,
+  .quiz .choice * {
+    color: #111 !important;
+    -webkit-text-fill-color: #111 !important;
+    opacity: 1 !important;
+  }
+
+  /* Часто цифра — це span/div з кругом */
+  .quiz .num,
+  .quiz .number,
+  .quiz .badge,
+  .quiz .circle,
+  .quiz .option__num,
+  .quiz .option__key,
+  .quiz .variant__num,
+  .quiz .variant__key,
+  .quiz .answer__num,
+  .quiz .answer__key,
+  .quiz [class*="num"],
+  .quiz [class*="key"] {
+    color: #111 !important;
+    -webkit-text-fill-color: #111 !important;
+    opacity: 1 !important;
+  }
+
+  /* Якщо варіант — це кнопка/label */
+  .quiz button,
+  .quiz label {
+    color: #111 !important;
+    -webkit-text-fill-color: #111 !important;
+  }
+
+  /* Якщо текст “зникає” через placeholder/disabled */
+  .quiz button[disabled],
+  .quiz label[disabled],
+  .quiz .disabled {
+    opacity: .65 !important;
+  }
+}

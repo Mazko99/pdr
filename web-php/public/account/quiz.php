@@ -559,7 +559,7 @@ if ($mode === 'exam' || $mode === 'exam_mix') {
         if ($mode === 'trainer' || $mode === 'trainer_mix' || $mode === 'trainer_topic') {
             $title = 'Тренажер';
             $timeLimit = 0; // ✅ unlimited
-            $maxMistakes = 999999; // ✅ unlimited mistakes
+            $maxMistakes = null; // ✅ unlimited mistakes
 
             if ($mode === 'trainer_topic') {
                 if ($topicReq === '' || !isset($topicPools[$topicReq]) || !is_array($topicPools[$topicReq])) {
