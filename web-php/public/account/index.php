@@ -539,7 +539,7 @@ $sessions = function_exists('sessions_list_for_user') ? sessions_list_for_user($
 
   <div class="plan__cta-row">
 
-    <form method="post" action="/pay/create.php">
+    <form method="post" action="/pay/create.php" style="display:inline">
       <input type="hidden" name="csrf" value="<?= htmlspecialchars(csrf_token(), ENT_QUOTES) ?>">
       <input type="hidden" name="action" value="trial">
       <input type="hidden" name="plan" value="30">
@@ -549,7 +549,7 @@ $sessions = function_exists('sessions_list_for_user') ? sessions_list_for_user($
       </button>
     </form>
 
-    <form method="post" action="/pay/create.php">
+    <form method="post" action="/pay/create.php" style="display:inline">
       <input type="hidden" name="csrf" value="<?= htmlspecialchars(csrf_token(), ENT_QUOTES) ?>">
       <input type="hidden" name="action" value="buy">
       <input type="hidden" name="plan" value="30">
@@ -596,14 +596,14 @@ $sessions = function_exists('sessions_list_for_user') ? sessions_list_for_user($
 
   <div class="plan__cta-row">
 
-    <form method="post" action="/pay/create.php">
+    <form method="post" action="/pay/create.php" style="display:inline">
       <input type="hidden" name="csrf" value="<?= htmlspecialchars(csrf_token(), ENT_QUOTES) ?>">
       <input type="hidden" name="action" value="trial">
       <input type="hidden" name="plan" value="12">
       <button type="submit" class="btn btn--primary">Отримати 3 дні</button>
     </form>
 
-    <form method="post" action="/pay/create.php">
+    <form method="post" action="/pay/create.php" style="display:inline">
       <input type="hidden" name="csrf" value="<?= htmlspecialchars(csrf_token(), ENT_QUOTES) ?>">
       <input type="hidden" name="action" value="buy">
       <input type="hidden" name="plan" value="12">
