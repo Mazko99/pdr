@@ -1698,3 +1698,65 @@ body.quiz-page .tests-topbar {
     color:#fff !important;
   }
 }
+/* =========================================================
+   FIX: GREEN BUTTONS MUST HAVE WHITE TEXT (override mobile fix)
+   Put THIS BLOCK AFTER your mobile quiz fix
+   ========================================================= */
+
+/* 1) Всі зелені / primary кнопки — білий текст */
+.btn--primary,
+.btn--green,
+.btn--success,
+.pp-btn--primary,
+.pp-btn--success,
+a.btn.btn--primary,
+a.btn.btn--green,
+a.btn.btn--success,
+button.btn--primary,
+button.btn--green,
+button.btn--success{
+  color:#fff !important;
+  -webkit-text-fill-color:#fff !important;
+}
+
+/* 2) І ВСЕ, що всередині зелених кнопок (span, small, b, svg...) теж біле */
+.btn--primary *, .btn--green *, .btn--success *,
+.pp-btn--primary *, .pp-btn--success *,
+a.btn.btn--primary *, a.btn.btn--green *, a.btn.btn--success *,
+button.btn--primary *, button.btn--green *, button.btn--success *{
+  color:#fff !important;
+  -webkit-text-fill-color:#fff !important;
+}
+
+/* 3) Білі/ghost кнопки — чорний текст */
+.btn--ghost,
+a.btn.btn--ghost,
+button.btn--ghost{
+  color:#111 !important;
+  -webkit-text-fill-color:#111 !important;
+}
+.btn--ghost *, a.btn.btn--ghost *, button.btn--ghost *{
+  color:#111 !important;
+  -webkit-text-fill-color:#111 !important;
+}
+
+/* 4) Відповіді у квізі (білі картки-відповіді) — чорний текст */
+.pp-option,
+.pp-option *{
+  color:#111 !important;
+  -webkit-text-fill-color:#111 !important;
+}
+
+/* 5) Вибрана/правильна відповідь (якщо у тебе робиться зеленою) — білий текст */
+.pp-option.is-selected,
+.pp-option.correct,
+.pp-option.active{
+  color:#fff !important;
+  -webkit-text-fill-color:#fff !important;
+}
+.pp-option.is-selected *,
+.pp-option.correct *,
+.pp-option.active *{
+  color:#fff !important;
+  -webkit-text-fill-color:#fff !important;
+}
