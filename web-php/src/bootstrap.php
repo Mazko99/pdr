@@ -146,8 +146,10 @@ function auth_user_id(): ?string {
 function auth_login(string $userId): void {
   $_SESSION['user_id'] = $userId;
 }
-if (function_exists('session_register_current')) {
-  session_register_current((string)$uid);
+
+$__uid = auth_user_id();
+if ($__uid && function_exists('session_touch_current')) {
+  session_touch_current((string)$__uid);
 }
 
 function auth_logout(): void {

@@ -2,175 +2,34 @@
 declare(strict_types=1);
 
 /**
- * ProstoPDR bootstrap.php
- * - Loads .env BEFORE session_start (so COOKIE_DOMAIN works)
- * - Starts one consistent session for www and non-www
- * - Provides helpers: env(), redirect(), csrf_*, auth_*
- * - Defines ppdr_storage_dir() + progress_* helpers
- * - Includes device_sessions.php once (after ppdr_storage_dir exists)
+ * Device + Session policy (stable cookie based):
+ * - Remembered devices: max 2 per user (whitelist)
+ * - Only 1 active session at a time (single-login)
+ *
+ * Storage: <PPDR_STORAGE_DIR>/device_sessions.json   (Railway Volume)
+ * Cookie:  ppdr_device_id (365 days)
  */
 
-// -------------------- .env loader (NO libs) --------------------
-(function () {
-  $candidates = [
-    dirname(__DIR__) . '/.env',          // web-php/.env
-    dirname(__DIR__, 2) . '/.env',       // fallback if structure differs
-    dirname(__DIR__) . '/public/.env',   // optional
-  ];
-
-  $envFile = null;
-  foreach ($candidates as $p) {
-    if (is_file($p)) { $envFile = $p; break; }
+function ds_storage_dir(): string {
+  // якщо bootstrap.php вже оголосив ppdr_storage_dir() — використовуємо його
+  if (function_exists('ppdr_storage_dir')) {
+    return (string)ppdr_storage_dir();
   }
-  if (!$envFile) return;
-
-  $lines = file($envFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
-  if (!$lines) return;
-
-  foreach ($lines as $line) {
-    $line = trim((string)$line);
-    if ($line === '' || str_starts_with($line, '#')) continue;
-
-    $pos = strpos($line, '=');
-    if ($pos === false) continue;
-
-    $key = trim(substr($line, 0, $pos));
-    $val = trim(substr($line, $pos + 1));
-
-    // strip quotes
-    if (
-      (str_starts_with($val, '"') && str_ends_with($val, '"')) ||
-      (str_starts_with($val, "'") && str_ends_with($val, "'"))
-    ) {
-      $val = substr($val, 1, -1);
-    }
-
-    if (getenv($key) === false) {
-      putenv($key . '=' . $val);
-      $_ENV[$key] = $val;
-    }
-  }
-})();
-
-// -------------------- Session (shared for www/non-www) --------------------
-if (session_status() !== PHP_SESSION_ACTIVE) {
-  $cookieDomain = (string)(getenv('COOKIE_DOMAIN') ?: '');
-
-  $isHttps =
-    (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
-    || ((string)($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https');
-
-  $params = [
-    'lifetime' => 0,
-    'path' => '/',
-    'httponly' => true,
-    'samesite' => 'Lax',
-    'secure' => $isHttps,
-  ];
-
-  // domain only if provided
-  if ($cookieDomain !== '') {
-    $params['domain'] = $cookieDomain; // e.g. .prostopdr.com
-  }
-
-  session_set_cookie_params($params);
-  session_start();
-}
-
-// -------------------- DB --------------------
-require_once __DIR__ . '/db.php';
-
-// Якщо в db.php вже є db() — не перевизначаємо
-if (!function_exists('db')) {
-  function db(): PDO {
-    static $pdo = null;
-    if ($pdo) return $pdo;
-
-    $url = getenv('DATABASE_URL');
-    if (!$url) throw new Exception('DATABASE_URL not set');
-
-    $parts = parse_url($url);
-    $host = $parts['host'] ?? 'localhost';
-    $port = $parts['port'] ?? 5432;
-    $user = $parts['user'] ?? '';
-    $pass = $parts['pass'] ?? '';
-    $db   = ltrim((string)($parts['path'] ?? ''), '/');
-
-    $dsn = "pgsql:host=$host;port=$port;dbname=$db";
-
-    $pdo = new PDO($dsn, $user, $pass, [
-      PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION
-    ]);
-
-    return $pdo;
-  }
-}
-
-// -------------------- Helpers --------------------
-function env(string $key, ?string $default = null): ?string {
-  $v = getenv($key);
-  if ($v === false || $v === '') return $default;
-  return $v;
-}
-
-function redirect(string $path): void {
-  header('Location: ' . $path, true, 302);
-  exit;
-}
-
-function csrf_token(): string {
-  if (empty($_SESSION['csrf'])) {
-    $_SESSION['csrf'] = bin2hex(random_bytes(16));
-  }
-  return (string)$_SESSION['csrf'];
-}
-
-function csrf_verify(?string $token): void {
-  $ok = isset($_SESSION['csrf']) && is_string($_SESSION['csrf']) && hash_equals($_SESSION['csrf'], (string)$token);
-  if (!$ok) {
-    http_response_code(419);
-    echo "CSRF token invalid";
-    exit;
-  }
-}
-
-// -------------------- Auth --------------------
-function auth_user_id(): ?string {
-  $id = $_SESSION['user_id'] ?? null;
-  if (!is_string($id) || $id === '') return null;
-  return $id;
-}
-
-function auth_login(string $userId): void {
-  $_SESSION['user_id'] = $userId;
-}
-
-function auth_logout(): void {
-  unset($_SESSION['user_id'], $_SESSION['has_access'], $_SESSION['plan']);
-}
-
-// -------------------- Storage dir (Railway Volume aware) --------------------
-function ppdr_storage_dir(): string {
-  // 1) Railway volume path (ти задаєш в Variables)
-  $dir = (string)getenv('PPDR_STORAGE_DIR');
-  if ($dir !== '') return rtrim($dir, '/\\');
-
-  // 2) fallback: public/storage (локально)
+  // fallback
   return dirname(__DIR__) . '/public/storage';
 }
 
-// -------------------- Progress helpers --------------------
-function progress_path(): string {
-  return ppdr_storage_dir() . '/progress.json';
+function ds_path(): string {
+  return rtrim(ds_storage_dir(), '/\\') . '/device_sessions.json';
 }
 
-function progress_load(): array {
-  $p = progress_path();
-
+function ds_load(): array {
+  $p = ds_path();
   if (!is_file($p)) return ['users' => []];
   $raw = file_get_contents($p);
   if (!is_string($raw) || $raw === '') return ['users' => []];
 
+  // remove BOM if any
   if (strncmp($raw, "\xEF\xBB\xBF", 3) === 0) $raw = substr($raw, 3);
 
   $data = json_decode($raw, true);
@@ -179,69 +38,163 @@ function progress_load(): array {
   return $data;
 }
 
-function progress_save(array $data): void {
-  $p = progress_path();
+function ds_save(array $data): void {
+  $p = ds_path();
   $dir = dirname($p);
-
   if (!is_dir($dir)) @mkdir($dir, 0775, true);
 
-  $json = json_encode($data, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
-  if (!is_string($json)) $json = '{"users":{}}';
+  $json = json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
+  if (!is_string($json)) return;
 
-  file_put_contents($p, $json, LOCK_EX);
+  $tmp = $p . '.tmp';
+  file_put_contents($tmp, $json, LOCK_EX);
+  @rename($tmp, $p);
 }
 
-// -------------------- Device policy include (once) --------------------
-// ВАЖЛИВО: підключаємо ПІСЛЯ ppdr_storage_dir(), щоб device_sessions.php міг писати в Volume
-$dsFile = __DIR__ . '/device_sessions.php';
-if (is_file($dsFile)) {
-  require_once $dsFile;
+function ds_now(): string { return date('c'); }
+
+function ds_strlen(string $s): int {
+  if (function_exists('mb_strlen')) return (int)mb_strlen($s, 'UTF-8');
+  return strlen($s);
 }
 
-function auth_enforce_device_policy(): void {
-  $uid = auth_user_id();
-  if (!$uid) return;
-
-  if (!function_exists('ds_is_session_active')) return;
-
-  $sid = session_id();
-  if ($sid === '') return;
-
-  if (!ds_is_session_active($uid, $sid)) {
-    auth_logout();
-    redirect('/login?reason=another_device');
+function ds_substr(string $s, int $start, ?int $len = null): string {
+  if (function_exists('mb_substr')) {
+    return $len === null
+      ? (string)mb_substr($s, $start, null, 'UTF-8')
+      : (string)mb_substr($s, $start, $len, 'UTF-8');
   }
+  return $len === null ? substr($s, $start) : substr($s, $start, $len);
+}
+
+function ds_device_label(): string {
+  $ua = (string)($_SERVER['HTTP_USER_AGENT'] ?? '');
+  $ua = preg_replace('/\s+/', ' ', trim($ua));
+  if ($ua === '') $ua = 'Unknown device';
+  if (ds_strlen($ua) > 90) $ua = ds_substr($ua, 0, 90) . '…';
+  return $ua;
+}
+
+function ds_device_cookie_name(): string { return 'ppdr_device_id'; }
+
+/**
+ * Stable device id via cookie (NOT IP-based).
+ * + domain from COOKIE_DOMAIN so it works on www and non-www
+ */
+function ds_device_id(): string {
+  $name = ds_device_cookie_name();
+  $v = $_COOKIE[$name] ?? null;
+
+  if (is_string($v)) {
+    $v = trim($v);
+    if ($v !== '' && preg_match('/^[a-f0-9]{32,64}$/', $v)) return $v;
+  }
+
+  $new = bin2hex(random_bytes(16)); // 32 hex
+  $cookieDomain = (string)(getenv('COOKIE_DOMAIN') ?: '');
+
+  $secure = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
+    || ((string)($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https');
+
+  $opts = [
+    'expires'  => time() + 365 * 86400,
+    'path'     => '/',
+    'secure'   => $secure,
+    'httponly' => true,
+    'samesite' => 'Lax',
+  ];
+  if ($cookieDomain !== '') $opts['domain'] = $cookieDomain;
+
+  setcookie($name, $new, $opts);
+  $_COOKIE[$name] = $new;
+
+  return $new;
 }
 
 /**
- * Recalculate access from users_store (call AFTER requiring users_store.php)
+ * Call on LOGIN success.
+ * Returns:
+ * - ['ok'=>true] OR
+ * - ['ok'=>false, 'error'=>'MAX_DEVICES', 'max'=>2]
  */
-function auth_refresh_access(): void {
-  if (!function_exists('user_find_by_id') || !function_exists('user_has_access')) {
-    return;
+function ds_on_login(string $uid, string $sessionToken, int $maxDevices = 2): array {
+  $data = ds_load();
+  if (!isset($data['users'][$uid]) || !is_array($data['users'][$uid])) {
+    $data['users'][$uid] = [
+      'devices' => [],
+      'active_session' => '',
+      'active_device' => '',
+      'active_at' => '',
+    ];
   }
 
-  $uid = auth_user_id();
-  if (!$uid) {
-    $_SESSION['has_access'] = false;
-    $_SESSION['plan'] = 'free';
-    return;
+  $u = $data['users'][$uid];
+  if (!isset($u['devices']) || !is_array($u['devices'])) $u['devices'] = [];
+
+  $deviceId = ds_device_id();
+  $label = ds_device_label();
+
+  if (!isset($u['devices'][$deviceId])) {
+    if (count($u['devices']) >= $maxDevices) {
+      return ['ok' => false, 'error' => 'MAX_DEVICES', 'max' => $maxDevices];
+    }
+    $u['devices'][$deviceId] = [
+      'label' => $label,
+      'first_seen' => ds_now(),
+      'last_seen' => ds_now(),
+    ];
+  } else {
+    $u['devices'][$deviceId]['last_seen'] = ds_now();
+    if (empty($u['devices'][$deviceId]['label'])) $u['devices'][$deviceId]['label'] = $label;
   }
 
-  $user = user_find_by_id($uid);
-  if (!$user) {
-    $_SESSION['has_access'] = false;
-    $_SESSION['plan'] = 'free';
-    return;
-  }
+  // Single active session
+  $u['active_session'] = $sessionToken;
+  $u['active_device']  = $deviceId;
+  $u['active_at']      = ds_now();
 
-  $_SESSION['plan'] = (string)($user['plan'] ?? 'free');
-  $_SESSION['has_access'] = user_has_access($user);
+  $data['users'][$uid] = $u;
+  ds_save($data);
+
+  return ['ok' => true];
 }
 
-// -------------------- OPTIONAL: session touch (NO $uid bug) --------------------
-// Якщо в тебе є session_touch_current() — викликаємо коректно (через auth_user_id())
-$__uid = auth_user_id();
-if ($__uid && function_exists('session_touch_current')) {
-  session_touch_current((string)$__uid);
+function ds_is_session_active(string $uid, string $sessionToken): bool {
+  $data = ds_load();
+  $u = $data['users'][$uid] ?? null;
+  if (!is_array($u)) return true;
+
+  $active = (string)($u['active_session'] ?? '');
+  if ($active === '') return true;
+
+  return hash_equals($active, $sessionToken);
+}
+
+function ds_reset_user(string $uid, bool $clearRememberedDevices = false): void {
+  $data = ds_load();
+  $u = $data['users'][$uid] ?? null;
+  if (!is_array($u)) return;
+
+  $u['active_session'] = '';
+  $u['active_device']  = '';
+  $u['active_at']      = '';
+
+  if ($clearRememberedDevices) $u['devices'] = [];
+
+  $data['users'][$uid] = $u;
+  ds_save($data);
+}
+
+function ds_on_logout(string $uid, string $sessionToken): void {
+  $data = ds_load();
+  $u = $data['users'][$uid] ?? null;
+  if (!is_array($u)) return;
+
+  if (isset($u['active_session']) && hash_equals((string)$u['active_session'], $sessionToken)) {
+    $u['active_session'] = '';
+    $u['active_device']  = '';
+    $u['active_at']      = '';
+    $data['users'][$uid] = $u;
+    ds_save($data);
+  }
 }
