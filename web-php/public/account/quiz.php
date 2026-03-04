@@ -152,7 +152,7 @@ if (!$hasAccess) {
         <link rel="preconnect" href="https://fonts.googleapis.com">
         <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
         <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=Unbounded:wght@500;700&display=swap" rel="stylesheet">
-        <link rel="stylesheet" href="/assets/css/style.css?v=4" />
+        <link rel="stylesheet" href="/assets/css/style.css?v=5" />
     </head>
     <body>
     <main class="section section--soft" style="padding-top:46px;">

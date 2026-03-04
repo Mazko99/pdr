@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../../src/bootstrap.php';
 require_once __DIR__ . '/../../src/users_store.php';
+require_once __DIR__ . '/../../src/progress_store.php';
 
 // 1) Треба бути залогіненим
 if (!auth_user_id()) {
@@ -174,14 +175,33 @@ function user_progress_set(string $uid, array $u): void {
 }
 
 function theory_is_done(string $uid, string $topic): bool {
-    $u = user_progress_get($uid);
+    // ✅ читаємо прогрес так само, як tests.php/quiz.php
+    if (function_exists('progress_user_get')) {
+        $u = progress_user_get($uid);
+    } else {
+        $u = user_progress_get($uid); // fallback (якщо раптом нема)
+    }
+
     $td = $u['theory_done'] ?? [];
     if (!is_array($td)) return false;
+
     $x = $td[$topic] ?? null;
     return is_array($x) && !empty($x['done']);
 }
 
 function theory_mark_done(string $uid, string $topic): void {
+    // ✅ пишемо прогрес так само, як tests.php/quiz.php
+    if (function_exists('progress_user_get') && function_exists('progress_user_set')) {
+        $u = progress_user_get($uid);
+        if (!is_array($u)) $u = [];
+        if (!isset($u['theory_done']) || !is_array($u['theory_done'])) $u['theory_done'] = [];
+
+        $u['theory_done'][$topic] = ['done' => true, 'at' => date('c')];
+        progress_user_set($uid, $u);
+        return;
+    }
+
+    // fallback старий
     $u = user_progress_get($uid);
     if (!isset($u['theory_done']) || !is_array($u['theory_done'])) $u['theory_done'] = [];
     $u['theory_done'][$topic] = ['done' => true, 'at' => date('c')];
