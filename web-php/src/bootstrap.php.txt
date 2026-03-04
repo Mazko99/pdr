@@ -169,45 +169,7 @@ function auth_enforce_device_policy(): void {
     redirect('/login?reason=another_device');
   }
 }
-function ppdr_storage_dir(): string {
-  // 1) Railway volume path (ти задаєш в Variables)
-  $dir = (string)getenv('PPDR_STORAGE_DIR');
-  if ($dir !== '') return rtrim($dir, '/\\');
 
-  // 2) fallback: public/storage (локально)
-  return dirname(__DIR__) . '/public/storage';
-}
-
-function progress_path(): string {
-  return ppdr_storage_dir() . '/progress.json';
-}
-
-function progress_load(): array {
-  $p = progress_path();
-
-  if (!is_file($p)) return ['users' => []];
-  $raw = file_get_contents($p);
-  if (!is_string($raw) || $raw === '') return ['users' => []];
-
-  if (strncmp($raw, "\xEF\xBB\xBF", 3) === 0) $raw = substr($raw, 3);
-
-  $data = json_decode($raw, true);
-  if (!is_array($data)) return ['users' => []];
-  if (!isset($data['users']) || !is_array($data['users'])) $data['users'] = [];
-  return $data;
-}
-
-function progress_save(array $data): void {
-  $p = progress_path();
-  $dir = dirname($p);
-
-  if (!is_dir($dir)) @mkdir($dir, 0775, true);
-
-  $json = json_encode($data, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
-  if (!is_string($json)) $json = '{"users":{}}';
-
-  file_put_contents($p, $json, LOCK_EX);
-}
 /**
  * Recalculate access from users_store (call AFTER requiring users_store.php)
  */
