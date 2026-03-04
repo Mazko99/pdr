@@ -20,7 +20,7 @@ auth_enforce_device_policy();
  * ProstoPDR — THEORY PAGE
  * - URL: /account/theory.php?topic=ЗАГАЛЬНІ%20ПОЛОЖЕННЯ
  * - Reads: /public/data/theory/{slug}.txt
- * - Saves "theory done": /storage/progress.json (fallback) OR your progress_user_set/get if exist
+ * - Saves "theory done": Postgres via progress_user_set/get (compat)
  * - No mbstring usage (fixes mb_strtolower error)
  */
 
@@ -92,7 +92,6 @@ function detect_uid_from_session(): string {
 
 $uid = detect_uid_from_session();
 if ($uid === '') {
-    // If you have your own auth redirect function, keep consistent; otherwise go to login
     redirect('/login');
 }
 
@@ -119,7 +118,7 @@ function slugify_ua(string $s): string {
     return $s;
 }
 
-/** -------------------- Progress storage (uses your lib if exists) -------------------- */
+/** -------------------- Progress storage (fallback JSON for local if needed) -------------------- */
 $progressLib = __DIR__ . '/../../src/progress.php';
 if (is_file($progressLib)) {
     require_once $progressLib;
@@ -173,23 +172,25 @@ function user_progress_set(string $uid, array $u): void {
     $all['users'][$uid] = $u;
     progress_write_all_fallback($p, $all);
 }
-$uid = (string)auth_user_id();
+
+/** -------------------- Topic input -------------------- */
 $topic = trim((string)($_GET['topic'] ?? ''));
 
 // ✅ натиснули "Перейти до тестування" => підтверджуємо теорію
 if ($uid !== '' && $topic !== '' && (string)($_GET['done'] ?? '') === '1') {
-  // 1) Записуємо "done" в Postgres (через progress_store)
-  if (function_exists('progress_mark_theory_done')) {
-    progress_mark_theory_done($uid, $topic);
-  } else {
-    // fallback якщо у тебе інша версія прогрес стора
-    if (function_exists('progress_user_get') && function_exists('progress_user_set')) {
+  // ✅ важливо: теорія має бути boolean true (compat), а не масив
+  if (function_exists('progress_user_get') && function_exists('progress_user_set')) {
       $u = progress_user_get($uid);
       if (!is_array($u)) $u = [];
       if (!isset($u['theory_done']) || !is_array($u['theory_done'])) $u['theory_done'] = [];
-      $u['theory_done'][$topic] = ['done' => true, 'at' => date('c')];
+      $u['theory_done'][$topic] = true;
       progress_user_set($uid, $u);
-    }
+  } else {
+      // fallback JSON
+      $u = user_progress_get($uid);
+      if (!isset($u['theory_done']) || !is_array($u['theory_done'])) $u['theory_done'] = [];
+      $u['theory_done'][$topic] = true;
+      user_progress_set($uid, $u);
   }
 
   // 2) Перекидаємо в тест, якщо передано go_test_id
@@ -197,7 +198,7 @@ if ($uid !== '' && $topic !== '' && (string)($_GET['done'] ?? '') === '1') {
   if ($goTestId > 0) {
     redirect('/account/quiz.php?mode=test&test_id=' . $goTestId);
   } else {
-    redirect('/account/tests.php'); // fallback
+    redirect('/account/tests.php');
   }
 }
 
@@ -206,14 +207,21 @@ function theory_is_done(string $uid, string $topic): bool {
     if (function_exists('progress_user_get')) {
         $u = progress_user_get($uid);
     } else {
-        $u = user_progress_get($uid); // fallback (якщо раптом нема)
+        $u = user_progress_get($uid);
     }
 
     $td = $u['theory_done'] ?? [];
     if (!is_array($td)) return false;
 
     $x = $td[$topic] ?? null;
-    return is_array($x) && !empty($x['done']);
+
+    // ✅ FIX: compat у Postgres зберігає boolean true
+    if (is_bool($x)) return $x;
+
+    // fallback для старих JSON-структур
+    if (is_array($x)) return !empty($x['done']);
+
+    return false;
 }
 
 function theory_mark_done(string $uid, string $topic): void {
@@ -223,15 +231,16 @@ function theory_mark_done(string $uid, string $topic): void {
         if (!is_array($u)) $u = [];
         if (!isset($u['theory_done']) || !is_array($u['theory_done'])) $u['theory_done'] = [];
 
-        $u['theory_done'][$topic] = ['done' => true, 'at' => date('c')];
+        // ✅ FIX: boolean true (а не масив)
+        $u['theory_done'][$topic] = true;
         progress_user_set($uid, $u);
         return;
     }
 
-    // fallback старий
+    // fallback старий JSON
     $u = user_progress_get($uid);
     if (!isset($u['theory_done']) || !is_array($u['theory_done'])) $u['theory_done'] = [];
-    $u['theory_done'][$topic] = ['done' => true, 'at' => date('c')];
+    $u['theory_done'][$topic] = true;
     user_progress_set($uid, $u);
 }
 
