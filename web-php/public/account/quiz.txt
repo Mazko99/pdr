@@ -8,7 +8,7 @@ require_once __DIR__ . '/../../src/progress_store.php';
  * ProstoPDR / public/account/quiz.php
  * JSON: public/data/questions_export.json, public/data/tests_export.json
  *
- * FIXES / ADD:
+ * FIXES / ADD
  * ✅ exam_topic / exam_mix / trainer_topic / trainer_mix
  * ✅ Exam: 40 questions, 40 minutes, 3 mistakes
  * ✅ Trainer: 40 questions, unlimited time, unlimited mistakes
@@ -434,6 +434,96 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $maxMistakes = 10;
 
         $qIds = [];
+         
+        <?php
+// ======================= DEBUG (TEMP) =======================
+if (!function_exists('ppdr_slugify_ua')) {
+  function ppdr_slugify_ua(string $s): string {
+    $s = trim($s);
+    if ($s === '') return '';
+    $map = [
+      'А'=>'A','Б'=>'B','В'=>'V','Г'=>'H','Ґ'=>'G','Д'=>'D','Е'=>'E','Є'=>'Ye','Ж'=>'Zh','З'=>'Z','И'=>'Y','І'=>'I','Ї'=>'Yi','Й'=>'Y','К'=>'K','Л'=>'L','М'=>'M','Н'=>'N','О'=>'O','П'=>'P','Р'=>'R','С'=>'S','Т'=>'T','У'=>'U','Ф'=>'F','Х'=>'Kh','Ц'=>'Ts','Ч'=>'Ch','Ш'=>'Sh','Щ'=>'Shch','Ю'=>'Yu','Я'=>'Ya',
+      'а'=>'a','б'=>'b','в'=>'v','г'=>'h','ґ'=>'g','д'=>'d','е'=>'e','є'=>'ye','ж'=>'zh','з'=>'z','и'=>'y','і'=>'i','ї'=>'yi','й'=>'y','к'=>'k','л'=>'l','м'=>'m','н'=>'n','о'=>'o','п'=>'p','р'=>'r','с'=>'s','т'=>'t','у'=>'u','ф'=>'f','х'=>'kh','ц'=>'ts','ч'=>'ch','ш'=>'sh','щ'=>'shch','ю'=>'yu','я'=>'ya',
+      'Ь'=>'','ь'=>'','Ъ'=>'','ъ'=>'','’'=>'', '\''=>'',
+      '«'=>'','»'=>'',
+    ];
+    $s = strtr($s, $map);
+    $s = preg_replace('~[^a-zA-Z0-9]+~', '-', $s);
+    $s = trim((string)$s, '-');
+    return strtolower($s);
+  }
+}
+
+$__uid_dbg = $uid ?? ($_SESSION['uid'] ?? $_SESSION['user_id'] ?? '');
+$__uid_dbg = (string)$__uid_dbg;
+
+$__prog_dbg = [];
+$__theory_map = [];
+$__topic_dbg = '';
+$__slug_dbg  = '';
+$__has_topic_key = null;
+$__has_slug_key  = null;
+
+if (function_exists('progress_user_get') && $__uid_dbg !== '') {
+  $__prog_dbg = progress_user_get($__uid_dbg);
+  if (is_array($__prog_dbg['theory_done'] ?? null)) {
+    $__theory_map = $__prog_dbg['theory_done'];
+  }
+}
+
+// спроба визначити topic який блокує (беремо з того ж місця, що й твій блокатор)
+$__topic_dbg = (string)($topic ?? ($needTheoryTopic ?? ($_SESSION['quiz']['topic'] ?? ($_SESSION['quiz']['meta']['topic'] ?? ''))));
+$__topic_dbg = trim($__topic_dbg);
+$__slug_dbg = $__topic_dbg !== '' ? ppdr_slugify_ua($__topic_dbg) : '';
+
+$__has_topic_key = ($__topic_dbg !== '' && isset($__theory_map[$__topic_dbg]));
+$__has_slug_key  = ($__slug_dbg !== '' && isset($__theory_map[$__slug_dbg]));
+
+// сесія квіза (обрізаємо щоб не було мегапростин)
+$__sess_quiz_dbg = $_SESSION['quiz'] ?? null;
+if (is_array($__sess_quiz_dbg)) {
+  $copy = $__sess_quiz_dbg;
+  if (isset($copy['questions']) && is_array($copy['questions'])) {
+    $copy['questions_count'] = count($copy['questions']);
+    unset($copy['questions']);
+  }
+  $__sess_quiz_dbg = $copy;
+}
+// ============================================================
+?>
+<div style="max-width:1100px;margin:20px auto;padding:14px;border:2px dashed #c00;border-radius:12px;font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;background:#fff;">
+  <div style="font-weight:900;color:#c00;margin-bottom:8px;">DEBUG: theory gate</div>
+
+  <div><b>uid</b>: <?= htmlspecialchars($__uid_dbg, ENT_QUOTES, 'UTF-8') ?></div>
+  <div><b>topic expected</b>: <?= htmlspecialchars($__topic_dbg, ENT_QUOTES, 'UTF-8') ?></div>
+  <div><b>slug(topic)</b>: <?= htmlspecialchars($__slug_dbg, ENT_QUOTES, 'UTF-8') ?></div>
+  <div><b>theory_done has TOPIC key?</b>: <?= var_export($__has_topic_key, true) ?></div>
+  <div><b>theory_done has SLUG key?</b>: <?= var_export($__has_slug_key, true) ?></div>
+
+  <details style="margin-top:10px;">
+    <summary style="cursor:pointer;font-weight:900;">theory_done keys (first 80)</summary>
+    <pre style="white-space:pre-wrap;word-break:break-word;"><?php
+      $keys = array_keys($__theory_map);
+      sort($keys);
+      $keys = array_slice($keys, 0, 80);
+      echo htmlspecialchars(print_r($keys, true), ENT_QUOTES, 'UTF-8');
+    ?></pre>
+  </details>
+
+  <details style="margin-top:10px;">
+    <summary style="cursor:pointer;font-weight:900;">progress_user_get(uid)</summary>
+    <pre style="white-space:pre-wrap;word-break:break-word;"><?php
+      echo htmlspecialchars(print_r($__prog_dbg, true), ENT_QUOTES, 'UTF-8');
+    ?></pre>
+  </details>
+
+  <details style="margin-top:10px;">
+    <summary style="cursor:pointer;font-weight:900;">SESSION[quiz] (trimmed)</summary>
+    <pre style="white-space:pre-wrap;word-break:break-word;"><?php
+      echo htmlspecialchars(print_r($__sess_quiz_dbg, true), ENT_QUOTES, 'UTF-8');
+    ?></pre>
+  </details>
+</div>
 
         // ===== TEST (as was) =====
         if ($mode === 'test') {
