@@ -1559,3 +1559,34 @@ body.quiz-page .tests-topbar {
     flex-direction: column !important;
   }
 }
+/* ================= DESKTOP FIX (ПК) ================= */
+@media (min-width: 900px){
+
+  .plan{
+    padding: 28px !important;
+    margin-bottom: 28px !important;
+  }
+
+  .plan__title{ margin-bottom: 14px !important; }
+  .plan__desc{ margin-bottom: 18px !important; }
+  .plan__price{ margin-bottom: 16px !important; }
+  .plan__banner{ margin-bottom: 18px !important; }
+  .plan__list{ margin-bottom: 20px !important; }
+
+  /* кнопки в ряд на ПК */
+  .plan__cta-row,
+  .plan .cta-row{
+    display:flex !important;
+    gap:12px !important;
+  }
+
+  .plan__cta-row form,
+  .plan .cta-row form{
+    flex:1 1 0 !important;
+  }
+
+  .plan__cta-row button,
+  .plan .cta-row button{
+    width:100% !important;
+  }
+}
