@@ -306,7 +306,7 @@ $csrf = csrf_token();
       <a class="account-tab <?php echo $mode==='trainer'?'is-active':''; ?>" href="/account/tests.php?mode=trainer">Тренажер</a>
     </div>
 
-   <?php if ($mode === 'exam'): ?>
+  <?php if ($mode === 'exam'): ?>
 
   <!-- =========================
        ІСПИТ
@@ -339,10 +339,10 @@ $csrf = csrf_token();
     </div>
   </div>
 
-<?php elseif ($mode === 'trainer'): ?>
+<?php endif; ?>
 
 
-    <?php if ($mode === 'trainer'): ?>
+<?php if ($mode === 'trainer'): ?>
 
   <!-- =========================
        ТРЕНАЖЕР
@@ -438,6 +438,7 @@ $csrf = csrf_token();
         $iPos = 0;
         foreach ($orderIds as $oid) { $oid = (int)$oid; if ($oid > 0) { $posMap[$oid] = $iPos; $iPos++; } }
       ?>
+
       <div class="topic-block__actions" style="margin-top:10px;display:flex;gap:10px;flex-wrap:wrap;">
         <a class="btn btn--ghost" href="/account/theory.php?topic=<?php echo urlencode($topicName); ?>">
           Теоретичний матеріал<?php echo $theoryDone ? ' ✅' : ''; ?>
@@ -454,6 +455,7 @@ $csrf = csrf_token();
             $time = (int)($t['time_limit_sec'] ?? 1200);
             if ($time <= 0) $time = 1200;
 
+            // ✅ як ти просив — 10 помилок
             $mist = 10;
           ?>
           <div class="test-card">
@@ -509,7 +511,6 @@ $csrf = csrf_token();
   <?php endforeach; ?>
 
 <?php endif; ?>
-
   </div>
 </main>
 <?php require_once __DIR__ . '/../partials/chat_widget.php'; ?>
