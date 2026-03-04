@@ -173,6 +173,33 @@ function user_progress_set(string $uid, array $u): void {
     $all['users'][$uid] = $u;
     progress_write_all_fallback($p, $all);
 }
+$uid = (string)auth_user_id();
+$topic = trim((string)($_GET['topic'] ?? ''));
+
+// ✅ натиснули "Перейти до тестування" => підтверджуємо теорію
+if ($uid !== '' && $topic !== '' && (string)($_GET['done'] ?? '') === '1') {
+  // 1) Записуємо "done" в Postgres (через progress_store)
+  if (function_exists('progress_mark_theory_done')) {
+    progress_mark_theory_done($uid, $topic);
+  } else {
+    // fallback якщо у тебе інша версія прогрес стора
+    if (function_exists('progress_user_get') && function_exists('progress_user_set')) {
+      $u = progress_user_get($uid);
+      if (!is_array($u)) $u = [];
+      if (!isset($u['theory_done']) || !is_array($u['theory_done'])) $u['theory_done'] = [];
+      $u['theory_done'][$topic] = ['done' => true, 'at' => date('c')];
+      progress_user_set($uid, $u);
+    }
+  }
+
+  // 2) Перекидаємо в тест, якщо передано go_test_id
+  $goTestId = (int)($_GET['go_test_id'] ?? 0);
+  if ($goTestId > 0) {
+    redirect('/account/quiz.php?mode=test&test_id=' . $goTestId);
+  } else {
+    redirect('/account/tests.php'); // fallback
+  }
+}
 
 function theory_is_done(string $uid, string $topic): bool {
     // ✅ читаємо прогрес так само, як tests.php/quiz.php
