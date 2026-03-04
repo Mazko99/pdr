@@ -199,19 +199,24 @@ if ($mode === 'trial' || $mode === 'trial_charge') {
 }
 
 // BUY
+// BUY
 if ($mode === 'buy') {
-  $chosen = $plan !== '' ? $plan : (string)($u['buy_pending_plan'] ?? 'base');
-  $chosen = norm_plan($chosen);
+  $chosen = $plan !== '' ? $plan : (string)($u['buy_pending_plan'] ?? 'basic');
+  // нормалізація під твої коди
+  if ($chosen !== 'mini12' && $chosen !== 'basic') $chosen = 'basic';
 
-  if ($chosen === '12d') {
-    $u['plan'] = '12d';
+  if ($chosen === 'mini12') {
+    $u['plan'] = 'mini12';
     $u['expires_at'] = gmdate('c', time() + 12 * 86400);
   } else {
-    $u['plan'] = 'base';
+    $u['plan'] = 'basic';
     $u['expires_at'] = gmdate('c', time() + 30 * 86400);
   }
 
+  $u['paid_at'] = gmdate('c');
+  $u['plan_set_at'] = gmdate('c');
   $u['mono_last_payment_at'] = gmdate('c');
+
   $u['buy_pending_invoice'] = null;
   $u['buy_pending_plan'] = null;
 
@@ -222,37 +227,29 @@ if ($mode === 'buy') {
   echo 'ok';
   exit;
 }
-
 // TRIAL (включно з fallback trial_...)
-if ($mode === 'trial') {
-  $pendingPlan = (string)($u['trial_pending_plan'] ?? 'base');
-  $pendingPlan = norm_plan($pendingPlan);
+// TRIAL
+$pendingPlan = (string)($u['trial_pending_plan'] ?? 'basic');
+if ($pendingPlan !== 'basic' && $pendingPlan !== 'mini12') $pendingPlan = 'basic';
 
-  // якщо webhook приніс plan — використовуємо його
-  if ($plan !== '') $pendingPlan = norm_plan($plan);
+$u['trial_used'] = true;
+$u['trial_started_at'] = (string)($u['trial_started_at'] ?? gmdate('c'));
+$u['trial_expires_at'] = gmdate('c', time() + 3 * 86400);
+$u['trial_cancelled'] = false;
 
-  $u['trial_used'] = true;
-  $u['trial_started_at'] = (string)($u['trial_started_at'] ?? gmdate('c'));
-  $u['trial_expires_at'] = gmdate('c', time() + 3 * 86400);
-  $u['trial_cancelled'] = false;
+$u['plan'] = $pendingPlan;                 // ✅ basic|mini12
+$u['expires_at'] = (string)$u['trial_expires_at'];
 
-  $u['plan'] = $pendingPlan;
-  $u['expires_at'] = (string)$u['trial_expires_at'];
+$u['paid_at'] = gmdate('c');
+$u['plan_set_at'] = gmdate('c');
 
-  if ($cardToken !== '') {
-    $u['mono_card_token'] = $cardToken;
-  }
-
-  $u['trial_pending_invoice'] = null;
-
-  user_upsert($u);
+user_upsert($u);
 
   log_line($logFile, "TRIAL OK -> plan={$u['plan']} trial_expires_at={$u['trial_expires_at']}");
   http_response_code(200);
   echo 'ok';
   exit;
 }
-
 // trial_charge — просто ack (поки не використовуємо)
 log_line($logFile, "TRIAL_CHARGE ACK");
 http_response_code(200);

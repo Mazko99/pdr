@@ -507,19 +507,19 @@ $sessions = function_exists('sessions_list_for_user') ? sessions_list_for_user($
                 </ul>
 
                 <div class="plan__cta-row">
-                  <form method="post" action="/pay/?a=checkout&mode=trial&plan=bas" style="display:inline;">
-                    <input type="hidden" name="csrf" value="<?= h(csrf_token()) ?>">
-                    <input type="hidden" name="action" value="trial">
-                    <input type="hidden" name="plan" value="30">
-                    <button class="btn btn--ghost plan__cta" type="submit">Отримати 3 дні безкоштовно</button>
-                  </form>
+                  <form method="post" action="/pay/create.php" style="display:inline">
+                  <input type="hidden" name="csrf" value="<?= htmlspecialchars(csrf_token(), ENT_QUOTES) ?>">
+                  <input type="hidden" name="action" value="trial">
+                  <input type="hidden" name="plan" value="30">
+                  <button type="submit">Отримати 3 дні</button>
+                </form>
 
-  		  <form method="post" action="/pay/?a=checkout&mode=buy&plan=bas" style="display:inline;">
-                    <input type="hidden" name="csrf" value="<?= h(csrf_token()) ?>">
-                    <input type="hidden" name="action" value="buy">
-                    <input type="hidden" name="plan" value="30">
-                    <button class="btn btn--primary plan__cta" type="submit">Обрати</button>
-                  </form>
+  		  <form method="post" action="/pay/create.php" style="display:inline">
+                  <input type="hidden" name="csrf" value="<?= htmlspecialchars(csrf_token(), ENT_QUOTES) ?>">
+                  <input type="hidden" name="action" value="buy">
+                  <input type="hidden" name="plan" value="30">
+                  <button type="submit">Обрати</button>
+                </form>
               </article>
 
               <!-- ✅ ДОДАНО: 349/12 днів (такий самий стиль кнопок) -->
@@ -548,20 +548,19 @@ $sessions = function_exists('sessions_list_for_user') ? sessions_list_for_user($
                 </ul>
 
                 <div class="plan__cta-row">
-                  <form method="post" action="/pay/?a=checkout&mode=trial&plan=base" style="display:inline;">
-                  <input type="hidden" name="csrf" value="<?= h(csrf_token()) ?>">
+                  <form method="post" action="/pay/create.php" style="display:inline">
+                  <input type="hidden" name="csrf" value="<?= htmlspecialchars(csrf_token(), ENT_QUOTES) ?>">
                   <input type="hidden" name="action" value="trial">
                   <input type="hidden" name="plan" value="12">
-                  <button class="btn btn--ghost plan__cta" type="submit">Отримати 3 дні безкоштовно</button>
+                  <button type="submit">Отримати 3 дні</button>
                 </form>
 
-  		<form method="post" action="/pay/?a=checkout&mode=buy&plan=personal" style="display:inline;">
-                  <input type="hidden" name="csrf" value="<?= h(csrf_token()) ?>">
-                  <input type="hidden" name="action" value="buy">
-                  <input type="hidden" name="plan" value="12">
-                  <button class="btn btn--primary plan__cta" type="submit">Обрати</button>
-  		</form>
-	      </div>
+  		<form method="post" action="/pay/create.php" style="display:inline">
+                <input type="hidden" name="csrf" value="<?= htmlspecialchars(csrf_token(), ENT_QUOTES) ?>">
+                <input type="hidden" name="action" value="buy">
+                <input type="hidden" name="plan" value="12">
+                <button type="submit">Обрати</button>
+              </form>
               </article>
 
             </div>
