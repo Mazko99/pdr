@@ -24,7 +24,59 @@ if (!$uid) {
   header('Location: /login', true, 302);
   exit;
 }
+$uid = auth_user_id();
+if (!$uid) {
+  header('Location: /login', true, 302);
+  exit;
+}
 
+/**
+ * ✅ Доступ рахуємо по users.json (plan + expires_at),
+ * і синхронізуємо $_SESSION['has_access'].
+ */
+function ppdr_user_has_access(?array $u): bool {
+  if (!is_array($u)) return false;
+
+  $plan = strtolower(trim((string)($u['plan'] ?? 'free')));
+  if ($plan === '' || $plan === 'free') return false;
+
+  // які плани вважаємо платними/активними
+  $paidPlans = ['basic','mini12','dev','admin','base','12d'];
+  if (!in_array($plan, $paidPlans, true)) return false;
+
+  $exp = trim((string)($u['expires_at'] ?? ''));
+  if ($exp === '') return true; // якщо без дати — вважаємо активним
+
+  $ts = strtotime($exp);
+  if ($ts === false) return true; // якщо дата крива — не блокуємо
+
+  return $ts > time();
+}
+
+// ✅ беремо актуального юзера зі storage
+$userNow = function_exists('user_find_by_id') ? user_find_by_id((string)$uid) : null;
+
+// ✅ рахуємо доступ
+$hasAccess = ppdr_user_has_access($userNow);
+
+// ✅ синхронізуємо сесію (це ключ!)
+$_SESSION['has_access'] = $hasAccess ? 1 : 0;
+
+// (не обов’язково, але корисно щоб інтерфейс теж бачив актуальні дані)
+if (is_array($userNow)) {
+  $_SESSION['plan'] = (string)($userNow['plan'] ?? '');
+  $_SESSION['expires_at'] = (string)($userNow['expires_at'] ?? '');
+}
+// DEBUG (потім видалиш)
+if (isset($_GET['dbg'])) {
+  header('Content-Type: text/plain; charset=utf-8');
+  echo "uid=" . $uid . "\n";
+  echo "session_has_access=" . (int)!empty($_SESSION['has_access']) . "\n";
+  echo "plan=" . (is_array($userNow) ? ($userNow['plan'] ?? '') : 'NOUSER') . "\n";
+  echo "expires_at=" . (is_array($userNow) ? ($userNow['expires_at'] ?? '') : '') . "\n";
+  echo "now=" . date('c') . "\n";
+  exit;
+}
 $hasAccess = !empty($_SESSION['has_access']);
 if (!$hasAccess) {
   http_response_code(200);

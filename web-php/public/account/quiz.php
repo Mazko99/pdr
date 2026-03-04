@@ -238,42 +238,89 @@ function progress_all_mistakes_ids(string $uid): array {
 /** -------- Auth -------- */
 $uid = auth_user_id();
 if (!$uid) {
-    header('Location: /login', true, 302);
-    exit;
+  header('Location: /login', true, 302);
+  exit;
 }
 
-$hasAccess = !empty($_SESSION['has_access']);
+// ✅ підтягнути доступ (якщо в bootstrap є логіка)
+if (function_exists('auth_refresh_access')) {
+  auth_refresh_access();
+}
+
+/**
+ * ✅ Доступ рахуємо по users.json (plan + expires_at),
+ * і синхронізуємо $_SESSION['has_access'].
+ */
+function ppdr_user_has_access(?array $u): bool {
+  if (!is_array($u)) return false;
+
+  $plan = strtolower(trim((string)($u['plan'] ?? 'free')));
+  if ($plan === '' || $plan === 'free') return false;
+
+  $paidPlans = ['basic','mini12','dev','admin','base','12d'];
+  if (!in_array($plan, $paidPlans, true)) return false;
+
+  $exp = trim((string)($u['expires_at'] ?? ''));
+  if ($exp === '') return true;
+
+  $ts = strtotime($exp);
+  if ($ts === false) return true;
+
+  return $ts > time();
+}
+
+$userNow = function_exists('user_find_by_id') ? user_find_by_id((string)$uid) : null;
+$hasAccess = ppdr_user_has_access($userNow);
+
+$_SESSION['has_access'] = $hasAccess ? 1 : 0;
+
+if (is_array($userNow)) {
+  $_SESSION['plan'] = (string)($userNow['plan'] ?? '');
+  $_SESSION['expires_at'] = (string)($userNow['expires_at'] ?? '');
+}
+// DEBUG (потім видалиш)
+if (isset($_GET['dbg'])) {
+  header('Content-Type: text/plain; charset=utf-8');
+  echo "uid=" . $uid . "\n";
+  echo "session_has_access=" . (int)!empty($_SESSION['has_access']) . "\n";
+  echo "plan=" . (is_array($userNow) ? ($userNow['plan'] ?? '') : 'NOUSER') . "\n";
+  echo "expires_at=" . (is_array($userNow) ? ($userNow['expires_at'] ?? '') : '') . "\n";
+  echo "now=" . date('c') . "\n";
+  exit;
+}
+
 if (!$hasAccess) {
-    http_response_code(200);
-    ?>
-    <!doctype html>
-    <html lang="uk">
-    <head>
-        <meta charset="utf-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <title>Доступ обмежено — ProstoPDR</title>
-        <link rel="preconnect" href="https://fonts.googleapis.com">
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-        <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=Unbounded:wght@500;700&display=swap" rel="stylesheet">
-        <link rel="stylesheet" href="/assets/css/style.css?v=4" />
-    </head>
-    <body>
-    <main class="section section--soft" style="padding-top:46px;">
-        <div class="container">
-            <div class="account-card">
-                <h2 class="h2">Доступ обмежено</h2>
-                <p class="lead">Щоб відкрити тести, тренажер та іспит — активуй підписку.</p>
-                <div style="margin-top:14px; display:flex; gap:10px; flex-wrap:wrap;">
-                    <a class="btn btn--primary" href="/account/index.php?tab=dashboard#pricing">Обрати тариф</a>
-                    <a class="btn btn--ghost" href="/account/index.php">В кабінет</a>
-                </div>
-            </div>
-        </div>
-    </main>
-    </body>
-    </html>
-    <?php
-    exit;
+  http_response_code(200);
+  ?>
+  <!doctype html>
+  <html lang="uk">
+  <head>
+      <meta charset="utf-8" />
+      <meta name="viewport" content="width=device-width, initial-scale=1" />
+      <title>Доступ обмежено — ProstoPDR</title>
+      <link rel="preconnect" href="https://fonts.googleapis.com">
+      <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+      <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=Unbounded:wght@500;700&display=swap" rel="stylesheet">
+      <link rel="stylesheet" href="/assets/css/style.css?v=4" />
+  </head>
+  <body>
+  <main class="section section--soft" style="padding-top:46px;">
+      <div class="container">
+          <div class="account-card">
+              <h2 class="h2">Доступ обмежено</h2>
+              <p class="lead">Щоб відкрити тести, тренажер та іспит — активуй підписку.</p>
+
+              <div style="margin-top:14px; display:flex; gap:10px; flex-wrap:wrap;">
+                  <a class="btn btn--primary" href="/account/index.php?tab=dashboard#pricing">Обрати тариф</a>
+                  <a class="btn btn--ghost" href="/account/index.php">В кабінет</a>
+              </div>
+          </div>
+      </div>
+  </main>
+  </body>
+  </html>
+  <?php
+  exit;
 }
 
 // ---- Progress (for theory + sequential unlock) ----
