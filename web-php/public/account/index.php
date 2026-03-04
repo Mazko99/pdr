@@ -482,90 +482,96 @@ $sessions = function_exists('sessions_list_for_user') ? sessions_list_for_user($
             <div class="pricing pricing--account">
 
               <!-- ✅ 699/міс -->
-              <article class="plan plan--basic" id="planCard">
-                <h3 class="plan__title">Базовий план<br/>підписка</h3>
-                <p class="plan__desc">
-                  Доступ до тестів ПДР, режиму «іспит», пояснень та статистики. Підписку можна скасувати у будь-який момент.
-                </p>
+<article class="plan plan--basic" id="planCard">
+  <h3 class="plan__title">Базовий план<br/>підписка</h3>
+  <p class="plan__desc">
+    Доступ до тестів ПДР, режиму «іспит», пояснень та статистики. Підписку можна скасувати у будь-який момент.
+  </p>
 
-                <div class="plan__price">
-                  <span class="plan__amount">699,00 грн</span><span class="plan__period">/міс</span>
-                </div>
+  <div class="plan__price">
+    <span class="plan__amount">699,00 грн</span><span class="plan__period">/міс</span>
+  </div>
 
-                <div class="plan__banner">
-                  <span class="dot dot--ok">✓</span>
-                  Підписка поновлюється автоматично та діє до кінця оплаченого періоду. Доступ одразу після оплати.
-                </div>
+  <div class="plan__banner">
+    <span class="dot dot--ok">✓</span>
+    Підписка поновлюється автоматично та діє до кінця оплаченого періоду. Доступ одразу після оплати.
+  </div>
 
-                <ul class="plan__list">
-                  <li>Тести ПДР з поясненнями</li>
-                  <li>Режим «іспит» з таймером</li>
-                  <li>Повторення помилок та «слабкі теми»</li>
-                  <li>Статистика прогресу по днях</li>
-                  <li>Доступ з телефону/ПК у будь-який час</li>
-                  <li>Нотатки до питань та тем</li>
-                </ul>
+  <ul class="plan__list">
+    <li>Тести ПДР з поясненнями</li>
+    <li>Режим «іспит» з таймером</li>
+    <li>Повторення помилок та «слабкі теми»</li>
+    <li>Статистика прогресу по днях</li>
+    <li>Доступ з телефону/ПК у будь-який час</li>
+    <li>Нотатки до питань та тем</li>
+  </ul>
 
-                <div class="plan__cta-row">
-                  <form method="post" action="/pay/create.php" style="display:inline">
-                  <input type="hidden" name="csrf" value="<?= htmlspecialchars(csrf_token(), ENT_QUOTES) ?>">
-                  <input type="hidden" name="action" value="trial">
-                  <input type="hidden" name="plan" value="30">
-                  <button type="submit">Отримати 3 дні</button>
-                </form>
+  <div class="plan__cta-row">
 
-  		  <form method="post" action="/pay/create.php" style="display:inline">
-                  <input type="hidden" name="csrf" value="<?= htmlspecialchars(csrf_token(), ENT_QUOTES) ?>">
-                  <input type="hidden" name="action" value="buy">
-                  <input type="hidden" name="plan" value="30">
-                  <button type="submit">Обрати</button>
-                </form>
-              </article>
+    <form method="post" action="/pay/create.php" style="display:inline">
+      <input type="hidden" name="csrf" value="<?= htmlspecialchars(csrf_token(), ENT_QUOTES) ?>">
+      <input type="hidden" name="action" value="trial">
+      <input type="hidden" name="plan" value="30">
+      <button type="submit" class="btn btn--primary">Отримати 3 дні</button>
+    </form>
 
-              <!-- ✅ ДОДАНО: 349/12 днів (такий самий стиль кнопок) -->
-              <article class="plan plan--personal">
-                <h3 class="plan__title">План на 12 днів</h3>
-                <p class="plan__desc">
-                  Доступ до тестів ПДР, режиму «іспит», пояснень та статистики. Підписку можна скасувати у будь-який момент.
-                </p>
+    <form method="post" action="/pay/create.php" style="display:inline">
+      <input type="hidden" name="csrf" value="<?= htmlspecialchars(csrf_token(), ENT_QUOTES) ?>">
+      <input type="hidden" name="action" value="buy">
+      <input type="hidden" name="plan" value="30">
+      <button type="submit" class="btn btn--ghost">Обрати</button>
+    </form>
 
-                <div class="plan__price">
-                  <span class="plan__amount">389,99 грн</span><span class="plan__period">/12 днів</span>
-                </div>
+  </div>
+</article>
 
-                <div class="plan__banner">
-                  <span class="dot dot--ok">✓</span>
-                  Доступ діє 12 днів з моменту оплати. Активується одразу після оплати.
-                </div>
 
-                <ul class="plan__list">
-                  <li>Тести ПДР з поясненнями</li>
-                  <li>Режим «іспит» з таймером</li>
-                  <li>Повторення помилок та «слабкі теми»</li>
-                  <li>Статистика прогресу по днях</li>
-                  <li>Доступ з телефону/ПК у будь-який час</li>
-                  <li>Нотатки до питань та тем</li>
-                </ul>
+<!-- ✅ 389 / 12 днів -->
+<article class="plan plan--personal">
 
-                <div class="plan__cta-row">
-                  <form method="post" action="/pay/create.php" style="display:inline">
-                  <input type="hidden" name="csrf" value="<?= htmlspecialchars(csrf_token(), ENT_QUOTES) ?>">
-                  <input type="hidden" name="action" value="trial">
-                  <input type="hidden" name="plan" value="12">
-                  <button type="submit">Отримати 3 дні</button>
-                </form>
+  <h3 class="plan__title">План на 12 днів</h3>
 
-  		<form method="post" action="/pay/create.php" style="display:inline">
-                <input type="hidden" name="csrf" value="<?= htmlspecialchars(csrf_token(), ENT_QUOTES) ?>">
-                <input type="hidden" name="action" value="buy">
-                <input type="hidden" name="plan" value="12">
-                <button type="submit">Обрати</button>
-              </form>
-              </article>
+  <p class="plan__desc">
+    Доступ до тестів ПДР, режиму «іспит», пояснень та статистики. Підписку можна скасувати у будь-який момент.
+  </p>
 
-            </div>
-          </div>
-        </div>
+  <div class="plan__price">
+    <span class="plan__amount">389,99 грн</span><span class="plan__period">/12 днів</span>
+  </div>
+
+  <div class="plan__banner">
+    <span class="dot dot--ok">✓</span>
+    Доступ діє 12 днів з моменту оплати. Активується одразу після оплати.
+  </div>
+
+  <ul class="plan__list">
+    <li>Тести ПДР з поясненнями</li>
+    <li>Режим «іспит» з таймером</li>
+    <li>Повторення помилок та «слабкі теми»</li>
+    <li>Статистика прогресу по днях</li>
+    <li>Доступ з телефону/ПК у будь-який час</li>
+    <li>Нотатки до питань та тем</li>
+  </ul>
+
+  <div class="plan__cta-row">
+
+    <form method="post" action="/pay/create.php" style="display:inline">
+      <input type="hidden" name="csrf" value="<?= htmlspecialchars(csrf_token(), ENT_QUOTES) ?>">
+      <input type="hidden" name="action" value="trial">
+      <input type="hidden" name="plan" value="12">
+      <button type="submit" class="btn btn--primary">Отримати 3 дні</button>
+    </form>
+
+    <form method="post" action="/pay/create.php" style="display:inline">
+      <input type="hidden" name="csrf" value="<?= htmlspecialchars(csrf_token(), ENT_QUOTES) ?>">
+      <input type="hidden" name="action" value="buy">
+      <input type="hidden" name="plan" value="12">
+      <button type="submit" class="btn btn--ghost">Обрати</button>
+    </form>
+
+  </div>
+
+</article>
 
         <!-- PROGRESS -->
         <aside class="dash-right">
