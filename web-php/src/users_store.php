@@ -27,22 +27,25 @@ function dbi(): PDO {
 }
 
 function ensure_schema(PDO $pdo): void {
-  // users table
+  // 1) базова таблиця (якщо ще нема)
   $pdo->exec("
     CREATE TABLE IF NOT EXISTS users (
       id            TEXT PRIMARY KEY,
       email         VARCHAR(190) UNIQUE,
       name          VARCHAR(190),
-      password_hash VARCHAR(255),
       plan          VARCHAR(32) NOT NULL DEFAULT 'free',
-      expires_at    TIMESTAMPTZ NULL,
-      paid_at       TIMESTAMPTZ NULL,
-      created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      meta          JSONB NOT NULL DEFAULT '{}'::jsonb
+      created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
   ");
 
-  // oauth links table
+  // 2) докручуємо всі потрібні колонки, якщо таблиця вже існувала
+  //    (CREATE TABLE IF NOT EXISTS НЕ додає нові колонки)
+  $pdo->exec("ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash VARCHAR(255);");
+  $pdo->exec("ALTER TABLE users ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ NULL;");
+  $pdo->exec("ALTER TABLE users ADD COLUMN IF NOT EXISTS paid_at TIMESTAMPTZ NULL;");
+  $pdo->exec("ALTER TABLE users ADD COLUMN IF NOT EXISTS meta JSONB NOT NULL DEFAULT '{}'::jsonb;");
+
+  // 3) oauth таблиця
   $pdo->exec("
     CREATE TABLE IF NOT EXISTS oauth_links (
       provider   VARCHAR(32) NOT NULL,
@@ -55,6 +58,7 @@ function ensure_schema(PDO $pdo): void {
     );
   ");
 
+  // 4) індекси
   $pdo->exec("CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);");
   $pdo->exec("CREATE INDEX IF NOT EXISTS idx_users_created ON users(created_at);");
   $pdo->exec("CREATE INDEX IF NOT EXISTS idx_oauth_user_id ON oauth_links(user_id);");
@@ -78,18 +82,22 @@ function normalize_iso(?string $v): ?string {
 function row_to_user(array $row): array {
   $meta = [];
   if (isset($row['meta'])) {
-    if (is_array($row['meta'])) $meta = $row['meta'];
-    elseif (is_string($row['meta'])) {
+    if (is_array($row['meta'])) {
+      $meta = $row['meta'];
+    } elseif (is_string($row['meta'])) {
       $j = json_decode($row['meta'], true);
       if (is_array($j)) $meta = $j;
     }
   }
 
+  // meta — основа (щоб підтримувати старий код який міг писати туди багато полів)
   $u = $meta;
 
   $u['id'] = (string)($row['id'] ?? ($u['id'] ?? ''));
   $u['email'] = (string)($row['email'] ?? ($u['email'] ?? ''));
   $u['name'] = (string)($row['name'] ?? ($u['name'] ?? ''));
+
+  // ✅ головне: password_hash існує
   $u['password_hash'] = (string)($row['password_hash'] ?? ($u['password_hash'] ?? ''));
 
   $u['plan'] = (string)($row['plan'] ?? ($u['plan'] ?? 'free'));
@@ -144,11 +152,9 @@ function user_create(string $email, string $name, string $passwordHash): string 
 
   if ($email === '') throw new InvalidArgumentException('user_create: empty email');
 
+  // якщо існує — повертаємо id, щоб не падати на UNIQUE
   $existing = user_find_by_email($email);
-  if ($existing) {
-    // Якщо вже є — повертаємо існуючий id (щоб не падало)
-    return (string)$existing['id'];
-  }
+  if ($existing) return (string)$existing['id'];
 
   $id = user_generate_id();
 
@@ -249,7 +255,7 @@ function user_upsert(array $u): array {
   ]);
 
   $row = $st->fetch();
-  return $row ? row_to_user($row) : ($u);
+  return $row ? row_to_user($row) : $u;
 }
 
 /* =========================
