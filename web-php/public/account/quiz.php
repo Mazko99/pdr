@@ -689,7 +689,29 @@ if ($mode === 'exam' || $mode === 'exam_mix') {
         $_SESSION['quiz'] = $quiz;
 
         // ✅ auto finish on mistakes limit (exam/test)
-        $mistakes = quiz_count_mistakes($quiz);
+        // ✅ auto finish on mistakes limit (ONLY for exam/test, NOT for trainer)
+$mistakes = quiz_count_mistakes($quiz);
+
+$modeNow = (string)($quiz['mode'] ?? '');
+$isTrainer = (strpos($modeNow, 'trainer') === 0);
+
+if (!$isTrainer) {
+    $allowed = $quiz['mistakes_allowed'] ?? null;
+    $allowed = is_null($allowed) ? null : (int)$allowed;
+
+    if ($allowed !== null) {
+        // на 3-й помилці завершуємо => коли mistakes > allowed (для allowed=2)
+        if ($mistakes > $allowed) {
+            quiz_redirect('/account/quiz.php?action=finish');
+        }
+    } else {
+        // fallback старої логіки
+        $maxMistakes = (int)($quiz['max_mistakes'] ?? 3);
+        if ($mistakes >= $maxMistakes) {
+            quiz_redirect('/account/quiz.php?action=finish');
+        }
+    }
+}
 
 // ✅ Якщо задано mistakes_allowed — працюємо по ньому (2 помилки допустимо)
 $allowed = $quiz['mistakes_allowed'] ?? null;
@@ -895,22 +917,24 @@ $mistakes = quiz_count_mistakes($quiz);
 $modeNow = (string)($quiz['mode'] ?? '');
 $isTrainer = (strpos($modeNow, 'trainer') === 0);
 
+$allowed = $quiz['mistakes_allowed'] ?? null;
+$allowed = is_null($allowed) ? null : (int)$allowed;
+
 if (!$isTrainer) {
-
-    $allowed = $quiz['mistakes_allowed'] ?? null;
-    $allowed = is_null($allowed) ? null : (int)$allowed;
-
     if ($allowed !== null) {
         if ($mistakes > $allowed) {
             quiz_redirect('/account/quiz.php?action=finish');
         }
+        $maxMistakes = $allowed; // ✅ для UI покажемо “/2”
     } else {
         $maxMistakes = (int)($quiz['max_mistakes'] ?? 3);
         if ($mistakes >= $maxMistakes) {
             quiz_redirect('/account/quiz.php?action=finish');
         }
     }
-
+} else {
+    // ✅ trainer: без ліміту (але maxMistakes залишимо для сумісності)
+    $maxMistakes = (int)($quiz['max_mistakes'] ?? 999999);
 }
 
 $csrf = csrf_token();
