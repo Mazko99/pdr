@@ -1760,3 +1760,28 @@ button.btn--ghost{
   color:#fff !important;
   -webkit-text-fill-color:#fff !important;
 }
+/* =========================================
+   FIX: BLACK BUTTONS MUST HAVE WHITE TEXT
+   ========================================= */
+
+/* чорні кнопки */
+.btn--dark,
+.btn--black,
+button.dark,
+button.black,
+a.btn--dark,
+a.btn--black{
+  color:#fff !important;
+  -webkit-text-fill-color:#fff !important;
+}
+
+/* все всередині чорних кнопок */
+.btn--dark *,
+.btn--black *,
+button.dark *,
+button.black *,
+a.btn--dark *,
+a.btn--black *{
+  color:#fff !important;
+  -webkit-text-fill-color:#fff !important;
+}
