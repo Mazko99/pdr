@@ -109,7 +109,7 @@ $payload = [
 if ($action === 'trial') {
   $payload['saveCardData'] = ['saveCard' => true];
 }
-
+error_log("MONO_CREATE payload webHookUrl=" . ($payload['webHookUrl'] ?? '') . " redirectUrl=" . ($payload['redirectUrl'] ?? ''));
 // create invoice
 $res  = mono_create_invoice($payload);
 $code = (int)($res['code'] ?? 0);
