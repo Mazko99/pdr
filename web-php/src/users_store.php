@@ -27,25 +27,22 @@ function dbi(): PDO {
 }
 
 function ensure_schema(PDO $pdo): void {
-  // 1) базова таблиця (якщо ще нема)
+  // users table
   $pdo->exec("
     CREATE TABLE IF NOT EXISTS users (
       id            TEXT PRIMARY KEY,
       email         VARCHAR(190) UNIQUE,
       name          VARCHAR(190),
+      password_hash VARCHAR(255),
       plan          VARCHAR(32) NOT NULL DEFAULT 'free',
-      created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      expires_at    TIMESTAMPTZ NULL,
+      paid_at       TIMESTAMPTZ NULL,
+      created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      meta          JSONB NOT NULL DEFAULT '{}'::jsonb
     );
   ");
 
-  // 2) докручуємо всі потрібні колонки, якщо таблиця вже існувала
-  //    (CREATE TABLE IF NOT EXISTS НЕ додає нові колонки)
-  $pdo->exec("ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash VARCHAR(255);");
-  $pdo->exec("ALTER TABLE users ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ NULL;");
-  $pdo->exec("ALTER TABLE users ADD COLUMN IF NOT EXISTS paid_at TIMESTAMPTZ NULL;");
-  $pdo->exec("ALTER TABLE users ADD COLUMN IF NOT EXISTS meta JSONB NOT NULL DEFAULT '{}'::jsonb;");
-
-  // 3) oauth таблиця
+  // oauth links table
   $pdo->exec("
     CREATE TABLE IF NOT EXISTS oauth_links (
       provider   VARCHAR(32) NOT NULL,
@@ -58,10 +55,16 @@ function ensure_schema(PDO $pdo): void {
     );
   ");
 
-  // 4) індекси
   $pdo->exec("CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);");
   $pdo->exec("CREATE INDEX IF NOT EXISTS idx_users_created ON users(created_at);");
   $pdo->exec("CREATE INDEX IF NOT EXISTS idx_oauth_user_id ON oauth_links(user_id);");
+
+  // Якщо ти колись створив users без password_hash / meta — додамо колонки (на всяк)
+  $pdo->exec("ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash VARCHAR(255);");
+  $pdo->exec("ALTER TABLE users ADD COLUMN IF NOT EXISTS meta JSONB NOT NULL DEFAULT '{}'::jsonb;");
+  $pdo->exec("ALTER TABLE users ADD COLUMN IF NOT EXISTS plan VARCHAR(32) NOT NULL DEFAULT 'free';");
+  $pdo->exec("ALTER TABLE users ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ NULL;");
+  $pdo->exec("ALTER TABLE users ADD COLUMN IF NOT EXISTS paid_at TIMESTAMPTZ NULL;");
 }
 
 function user_generate_id(): string {
@@ -82,22 +85,18 @@ function normalize_iso(?string $v): ?string {
 function row_to_user(array $row): array {
   $meta = [];
   if (isset($row['meta'])) {
-    if (is_array($row['meta'])) {
-      $meta = $row['meta'];
-    } elseif (is_string($row['meta'])) {
+    if (is_array($row['meta'])) $meta = $row['meta'];
+    elseif (is_string($row['meta'])) {
       $j = json_decode($row['meta'], true);
       if (is_array($j)) $meta = $j;
     }
   }
 
-  // meta — основа (щоб підтримувати старий код який міг писати туди багато полів)
   $u = $meta;
 
   $u['id'] = (string)($row['id'] ?? ($u['id'] ?? ''));
   $u['email'] = (string)($row['email'] ?? ($u['email'] ?? ''));
   $u['name'] = (string)($row['name'] ?? ($u['name'] ?? ''));
-
-  // ✅ головне: password_hash існує
   $u['password_hash'] = (string)($row['password_hash'] ?? ($u['password_hash'] ?? ''));
 
   $u['plan'] = (string)($row['plan'] ?? ($u['plan'] ?? 'free'));
@@ -110,7 +109,9 @@ function row_to_user(array $row): array {
   $u['paid_at'] = $u['paid_at'] ? normalize_iso((string)$u['paid_at']) : null;
 
   // plan safety
-  if ($u['plan'] === '' || strtolower($u['plan']) === 'null') $u['plan'] = 'free';
+  $p = strtolower(trim((string)$u['plan']));
+  if ($p === '' || $p === 'null') $p = 'free';
+  $u['plan'] = $p;
 
   return $u;
 }
@@ -152,9 +153,11 @@ function user_create(string $email, string $name, string $passwordHash): string 
 
   if ($email === '') throw new InvalidArgumentException('user_create: empty email');
 
-  // якщо існує — повертаємо id, щоб не падати на UNIQUE
   $existing = user_find_by_email($email);
-  if ($existing) return (string)$existing['id'];
+  if ($existing) {
+    // Якщо вже є — повертаємо існуючий id (щоб не падало)
+    return (string)$existing['id'];
+  }
 
   $id = user_generate_id();
 
@@ -183,6 +186,9 @@ function user_verify_password(array $user, string $pass): bool {
  * Приймає повний масив $u і зберігає:
  * - колонки: email,name,password_hash,plan,expires_at,paid_at
  * - все інше у meta (JSONB)
+ *
+ * ✅ FIX: НІКОЛИ не біндимо NULL у :expires_at/:paid_at (Postgres не визначає тип).
+ * Біндимо '' і робимо NULLIF(...,'')::timestamptz
  */
 function user_upsert(array $u): array {
   $pdo = dbi();
@@ -205,6 +211,10 @@ function user_upsert(array $u): array {
   $expiresIso = $expiresAt ? normalize_iso((string)$expiresAt) : null;
   $paidIso    = $paidAt ? normalize_iso((string)$paidAt) : null;
 
+  // ✅ ВАЖЛИВО: Біндимо '' замість NULL (інакше буде "Ambiguous parameter")
+  $expiresBind = $expiresIso ?? '';
+  $paidBind    = $paidIso ?? '';
+
   // meta = все, крім колонок
   $meta = $u;
   unset(
@@ -219,7 +229,7 @@ function user_upsert(array $u): array {
   );
 
   $metaJson = json_encode($meta, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-  if (!is_string($metaJson)) $metaJson = '{}';
+  if (!is_string($metaJson) || $metaJson === '') $metaJson = '{}';
 
   $st = $pdo->prepare("
     INSERT INTO users (id, email, name, password_hash, plan, expires_at, paid_at, meta)
@@ -229,9 +239,9 @@ function user_upsert(array $u): array {
       NULLIF(:name,''),
       NULLIF(:ph,''),
       :plan,
-      CASE WHEN :expires_at IS NULL THEN NULL ELSE :expires_at::timestamptz END,
-      CASE WHEN :paid_at IS NULL THEN NULL ELSE :paid_at::timestamptz END,
-      COALESCE(:meta::jsonb, '{}'::jsonb)
+      NULLIF(:expires_at,'')::timestamptz,
+      NULLIF(:paid_at,'')::timestamptz,
+      :meta::jsonb
     )
     ON CONFLICT (id) DO UPDATE SET
       email = COALESCE(NULLIF(EXCLUDED.email,''), users.email),
@@ -243,14 +253,15 @@ function user_upsert(array $u): array {
       meta = users.meta || EXCLUDED.meta
     RETURNING *
   ");
+
   $st->execute([
     'id' => $id,
     'email' => $email,
     'name' => $name,
     'ph' => $ph,
     'plan' => $plan,
-    'expires_at' => $expiresIso,
-    'paid_at' => $paidIso,
+    'expires_at' => $expiresBind,
+    'paid_at' => $paidBind,
     'meta' => $metaJson,
   ]);
 
@@ -313,8 +324,13 @@ function oauth_link(string $provider, string $sub, string $userId, string $email
       name  = COALESCE(NULLIF(EXCLUDED.name,''),  oauth_links.name)
     RETURNING provider,sub,user_id,email,name,linked_at
   ");
+
   $st->execute([
-    'p'=>$provider,'s'=>$sub,'uid'=>$userId,'e'=>$email,'n'=>$name
+    'p'=>$provider,
+    's'=>$sub,
+    'uid'=>$userId,
+    'e'=>$email,
+    'n'=>$name
   ]);
 
   $row = $st->fetch();
