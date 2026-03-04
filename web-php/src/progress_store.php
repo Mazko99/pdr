@@ -13,7 +13,7 @@ require_once __DIR__ . '/db.php';
  * - progress_all_mistakes_ids(string $uid): array
  * - progress_user_mistakes_by_test(string $uid): array<int, array<int>>
  *
- * Compatibility API (щоб не ламати старий код):
+ * Compatibility API (щоб не ламати старий код quiz.php/tests.php/theory.php):
  * - progress_user_get(string $uid): array  -> ['passed_tests'=>map, 'theory_done'=>map]
  * - progress_user_set(string $uid, array $u): void
  */
@@ -35,6 +35,25 @@ function progress_table_has_column(PDO $pdo, string $table, string $column): boo
   ");
   $st->execute([':t' => $table, ':c' => $column]);
   return (bool)$st->fetchColumn();
+}
+
+function progress_pick_theory_key_column(PDO $pdo): string {
+  // Найчастіші назви “ключа теми”
+  $candidates = [
+    'item',
+    'topic_key',
+    'theory_key',
+    'theory_id',
+    'topic',
+    'slug',
+    'key',
+    'code',
+  ];
+  foreach ($candidates as $c) {
+    if (progress_table_has_column($pdo, 'user_theory_done', $c)) return $c;
+  }
+  // якщо взагалі нема — повернемо item як дефолт (але тоді ensure_schema додасть item)
+  return 'item';
 }
 
 /** Базові таблиці: складені тести + помилки + теорія */
@@ -63,16 +82,19 @@ function progress_ensure_schema(PDO $pdo): void {
   $pdo->exec("CREATE INDEX IF NOT EXISTS idx_mistakes_user ON user_test_mistakes(user_id);");
   $pdo->exec("CREATE INDEX IF NOT EXISTS idx_mistakes_test ON user_test_mistakes(test_id);");
 
-  // 3) теорія (compat)
+  // 3) теорія
   progress_ensure_theory_schema($pdo);
 }
 
 /**
- * Таблиця для “теорія пройдена”.
- * ✅ ВАЖЛИВО: якщо таблиця вже існує зі старими колонками — докручуємо.
+ * Теорія:
+ * У тебе в БД вже існує user_theory_done зі старою схемою (topic_key NOT NULL).
+ * Тому ми:
+ * - НЕ ламаємо існуючу таблицю/PK
+ * - додаємо item/done_at якщо треба (але вставляємо в реальну key-колонку)
  */
 function progress_ensure_theory_schema(PDO $pdo): void {
-  // створюємо “правильну” структуру, якщо таблиці нема
+  // створимо таблицю тільки якщо її взагалі нема
   $pdo->exec("
     CREATE TABLE IF NOT EXISTS user_theory_done (
       user_id TEXT NOT NULL,
@@ -82,47 +104,28 @@ function progress_ensure_theory_schema(PDO $pdo): void {
     );
   ");
 
-  // якщо таблиця існувала раніше і там нема item — додаємо
-  if (!progress_table_has_column($pdo, 'user_theory_done', 'item')) {
-    // пробуємо додати item
-    $pdo->exec("ALTER TABLE user_theory_done ADD COLUMN IF NOT EXISTS item TEXT;");
-
-    // якщо є старі колонки — мігруємо дані в item
-    $fallbacks = ['theory_id', 'theory_key', 'theory', 'key', 'slug', 'code'];
-    foreach ($fallbacks as $col) {
-      if (progress_table_has_column($pdo, 'user_theory_done', $col)) {
-        // переносимо лише порожні item
-        $pdo->exec("UPDATE user_theory_done SET item = CAST($col AS TEXT) WHERE item IS NULL OR item = '';");
-        break;
-      }
-    }
-
-    // якщо item досі null — ставимо заглушку щоб не падало
-    $pdo->exec("UPDATE user_theory_done SET item = 'unknown' WHERE item IS NULL OR item = '';");
-  }
-
-  // якщо нема done_at — теж докрутимо (на всяк)
+  // done_at якщо нема
   if (!progress_table_has_column($pdo, 'user_theory_done', 'done_at')) {
     $pdo->exec("ALTER TABLE user_theory_done ADD COLUMN IF NOT EXISTS done_at TIMESTAMPTZ NOT NULL DEFAULT NOW();");
   }
 
-  // індекс
-  $pdo->exec("CREATE INDEX IF NOT EXISTS idx_theory_user ON user_theory_done(user_id);");
+  // item як додаткова колонка (на випадок старих схем) — НЕ обов’язково, але корисно
+  if (!progress_table_has_column($pdo, 'user_theory_done', 'item')) {
+    $pdo->exec("ALTER TABLE user_theory_done ADD COLUMN IF NOT EXISTS item TEXT;");
+  }
 
-  // ⚠️ Якщо primary key старий/інший — ми його тут не ламаємо, щоб не ризикувати.
-  // Головне: читання по item тепер працює.
+  $pdo->exec("CREATE INDEX IF NOT EXISTS idx_theory_user ON user_theory_done(user_id);");
 }
 
 /**
  * Додає помилки (question IDs) до тесту.
- * ✅ FIX: дозволяємо testId=0 (екзамен/мікс), раніше було <=0 і все ігнорувалось.
+ * ✅ FIX: дозволяємо testId=0 (екзамен/мікс).
  */
 function progress_add_mistakes(string $uid, int $testId, array $qids): void {
   $uid = trim($uid);
   if ($uid === '') return;
 
-  // ✅ дозволяємо bucket 0
-  if ($testId < 0) $testId = 0;
+  if ($testId < 0) $testId = 0; // bucket 0 дозволений
 
   // чистимо список
   $clean = [];
@@ -134,7 +137,6 @@ function progress_add_mistakes(string $uid, int $testId, array $qids): void {
 
   $pdo = pdoi();
 
-  // Вставка пачкою. ON CONFLICT -> ignore
   $values = [];
   $params = [];
   $i = 0;
@@ -157,9 +159,7 @@ function progress_add_mistakes(string $uid, int $testId, array $qids): void {
   $st->execute();
 }
 
-/**
- * Позначає тест як “складений”.
- */
+/** Позначає тест як “складений”. */
 function progress_mark_passed(string $uid, int $testId): void {
   $uid = trim($uid);
   if ($uid === '' || $testId <= 0) return;
@@ -173,9 +173,7 @@ function progress_mark_passed(string $uid, int $testId): void {
   $st->execute([':u' => $uid, ':t' => $testId]);
 }
 
-/**
- * Повертає ВСІ question_id, де користувач колись помилився (без дублікатів).
- */
+/** Повертає всі question_id, де користувач помилявся. */
 function progress_all_mistakes_ids(string $uid): array {
   $uid = trim($uid);
   if ($uid === '') return [];
@@ -192,10 +190,7 @@ function progress_all_mistakes_ids(string $uid): array {
   return array_map('intval', $rows ?: []);
 }
 
-/**
- * Повертає помилки по тестах:
- * [ test_id => [question_id, question_id...] ]
- */
+/** Помилки по тестах: [ test_id => [question_id...] ] */
 function progress_user_mistakes_by_test(string $uid): array {
   $uid = trim($uid);
   if ($uid === '') return [];
@@ -222,13 +217,6 @@ function progress_user_mistakes_by_test(string $uid): array {
    Compatibility layer: progress_user_get / progress_user_set
    ======================================================================= */
 
-/**
- * Повертає прогрес у форматі, який очікує quiz.php:
- * [
- *   'passed_tests' => ['12'=>true, '13'=>true, ...],
- *   'theory_done'  => ['topic_x'=>true, ...]
- * ]
- */
 function progress_user_get(string $uid): array {
   $uid = trim($uid);
   if ($uid === '') return ['passed_tests' => [], 'theory_done' => []];
@@ -243,12 +231,14 @@ function progress_user_get(string $uid): array {
     $passed[(string)(int)$tid] = true;
   }
 
-  // theory_done (item може бути доданий міграцією)
-  $st = $pdo->prepare("SELECT item FROM user_theory_done WHERE user_id = :u");
+  // theory_done
+  $keyCol = progress_pick_theory_key_column($pdo);
+  $sql = "SELECT {$keyCol} AS k FROM user_theory_done WHERE user_id = :u";
+  $st = $pdo->prepare($sql);
   $st->execute([':u' => $uid]);
   $theory = [];
   foreach ($st->fetchAll(PDO::FETCH_COLUMN) as $it) {
-    $it = (string)$it;
+    $it = trim((string)$it);
     if ($it === '') continue;
     $theory[$it] = true;
   }
@@ -259,9 +249,6 @@ function progress_user_get(string $uid): array {
   ];
 }
 
-/**
- * Приймає масив прогресу і синхронізує його в БД.
- */
 function progress_user_set(string $uid, array $u): void {
   $uid = trim($uid);
   if ($uid === '') return;
@@ -279,15 +266,30 @@ function progress_user_set(string $uid, array $u): void {
 
   // 2) theory_done
   if (isset($u['theory_done']) && is_array($u['theory_done'])) {
-    $st = $pdo->prepare("
-      INSERT INTO user_theory_done (user_id, item)
-      VALUES (:u, :i)
-      ON CONFLICT DO NOTHING
-    ");
-    foreach ($u['theory_done'] as $item => $flag) {
-      $item = trim((string)$item);
-      if ($item === '' || !$flag) continue;
-      $st->execute([':u' => $uid, ':i' => $item]);
+    $keyCol = progress_pick_theory_key_column($pdo);
+
+    // Підготовка insert під РЕАЛЬНУ схему (topic_key/item/...)
+    $sql = "INSERT INTO user_theory_done (user_id, {$keyCol}) VALUES (:u, :k) ON CONFLICT DO NOTHING";
+    $st = $pdo->prepare($sql);
+
+    foreach ($u['theory_done'] as $key => $flag) {
+      // У тебе в theory.php зараз зберігається масив ['done'=>true,'at'=>...]
+      // Ми трактуємо це як "true"
+      $isTrue = false;
+      if (is_bool($flag)) $isTrue = $flag;
+      elseif (is_array($flag)) $isTrue = !empty($flag['done']);
+      else $isTrue = (bool)$flag;
+
+      $k = trim((string)$key);
+      if ($k === '' || !$isTrue) continue;
+
+      $st->execute([':u' => $uid, ':k' => $k]);
+
+      // якщо є колонка item — продублюємо для уніфікації (не обов’язково, але зручно)
+      if ($keyCol !== 'item' && progress_table_has_column($pdo, 'user_theory_done', 'item')) {
+        $st2 = $pdo->prepare("UPDATE user_theory_done SET item = COALESCE(NULLIF(item,''), :it) WHERE user_id=:u AND {$keyCol}=:k");
+        $st2->execute([':u' => $uid, ':k' => $k, ':it' => $k]);
+      }
     }
   }
 }
