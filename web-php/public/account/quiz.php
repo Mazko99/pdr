@@ -559,7 +559,8 @@ if ($mode === 'exam' || $mode === 'exam_mix') {
         if ($mode === 'trainer' || $mode === 'trainer_mix' || $mode === 'trainer_topic') {
             $title = 'Тренажер';
             $timeLimit = 0; // ✅ unlimited
-            $maxMistakes = null; // ✅ unlimited mistakes
+            $maxMistakes = null;     // ✅ unlimited (не показувати "/999999")
+            $mistakesAllowed = null; // ✅ unlimited (для нового рендера)
 
             if ($mode === 'trainer_topic') {
                 if ($topicReq === '' || !isset($topicPools[$topicReq]) || !is_array($topicPools[$topicReq])) {
@@ -628,7 +629,7 @@ if ($mode === 'exam' || $mode === 'exam_mix') {
     'time_limit_sec' => $timeLimit,
 
     // старе поле лишаємо, але новий іспит буде дивитись на mistakes_allowed
-    'max_mistakes' => $maxMistakes,
+    'max_mistakes' => is_null($maxMistakes) ? null : (int)$maxMistakes,
 
     // ✅ нове: дозволені помилки (2), завершення на 3-й (тобто коли mistakes > 2)
     'mistakes_allowed' => isset($mistakesAllowed) ? (int)$mistakesAllowed : null,
@@ -1097,7 +1098,18 @@ $topic = (string)($quiz['topic'] ?? '');
             <div class="pp-bar">
                 <div class="pp-bar__left">
                     <div class="pp-pill"><small>Питання</small> <span><?= (int)($idx+1) ?></span>/<span><?= (int)$total ?></span></div>
-                    <div class="pp-pill"><small>Помилки</small> <span id="mistakesNow"><?= (int)$mistakes ?></span>/<span><?= (int)$maxMistakes ?></span></div>
+                    <?php $isTrainerMode = strpos((string)$quiz['mode'], 'trainer') === 0; ?>
+
+<div class="pp-pill">
+  <small>Помилки</small>
+
+  <?php if ($isTrainerMode): ?>
+      <span id="mistakesNow"><?= (int)$mistakes ?></span>
+  <?php else: ?>
+      <span id="mistakesNow"><?= (int)$mistakes ?></span>/<span><?= (int)$maxMistakes ?></span>
+  <?php endif; ?>
+
+</div>
 
                     <?php if ($timeLimit > 0): ?>
                         <div class="pp-pill"><small>Час</small> <span id="timerText"><?= h(format_mmss((int)$timeLeft)) ?></span> / <span><?= h(format_mmss((int)$timeLimit)) ?></span></div>
