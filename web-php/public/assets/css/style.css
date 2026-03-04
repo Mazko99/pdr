@@ -1785,3 +1785,35 @@ a.btn--black *{
   color:#fff !important;
   -webkit-text-fill-color:#fff !important;
 }
+/* =========================================
+   FIX: green bottom action button -> white text
+   (button "Обери відповідь")
+   ========================================= */
+
+@media (max-width: 768px) {
+
+  /* 1) Найчастіше ця кнопка має клас primary/success */
+  .pp-bottom .pp-btn--primary,
+  .pp-bottom .pp-btn--success,
+  .pp-bottom .btn--primary,
+  .pp-bottom .btn--success{
+    color:#fff !important;
+    -webkit-text-fill-color:#fff !important;
+  }
+
+  /* 2) І ВСЕ всередині кнопки теж білим (бо в тебе було button * -> #111) */
+  .pp-bottom .pp-btn--primary *,
+  .pp-bottom .pp-btn--success *,
+  .pp-bottom .btn--primary *,
+  .pp-bottom .btn--success *{
+    color:#fff !important;
+    -webkit-text-fill-color:#fff !important;
+  }
+
+  /* 3) На всякий — якщо це просто <button type="submit"> в правій частині */
+  .pp-bottom .pp-bar__right button,
+  .pp-bottom .pp-bar__right button *{
+    color:#fff !important;
+    -webkit-text-fill-color:#fff !important;
+  }
+}
