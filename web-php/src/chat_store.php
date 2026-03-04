@@ -20,15 +20,34 @@ declare(strict_types=1);
  * }
  */
 
+/**
+ * ✅ ЄДИНЕ місце для storage (Railway volume):
+ * - якщо в bootstrap.php є ppdr_storage_dir() — беремо його
+ * - інакше беремо PPDR_STORAGE_DIR
+ * - fallback локально: /public/storage
+ */
+function chat_storage_dir(): string {
+  if (function_exists('ppdr_storage_dir')) {
+    $d = (string)ppdr_storage_dir();
+    if ($d !== '') return rtrim($d, '/\\');
+  }
+
+  $dir = (string)getenv('PPDR_STORAGE_DIR');
+  if ($dir !== '') return rtrim($dir, '/\\');
+
+  return dirname(__DIR__) . '/public/storage';
+}
+
 function chats_store_path(): string {
-  return dirname(__DIR__) . '/storage/chats.json';
+  return chat_storage_dir() . '/chats.json';
 }
 
 function chats_load(): array {
   $p = chats_store_path();
   if (!is_file($p)) return ['threads' => [], 'last_id' => 0];
 
-  $raw = (string)file_get_contents($p);
+  $raw = file_get_contents($p);
+  if (!is_string($raw)) return ['threads' => [], 'last_id' => 0];
   if (trim($raw) === '') return ['threads' => [], 'last_id' => 0];
 
   if (strncmp($raw, "\xEF\xBB\xBF", 3) === 0) $raw = substr($raw, 3);
@@ -51,12 +70,20 @@ function chats_save(array $data): void {
   if (!is_dir($dir)) @mkdir($dir, 0775, true);
 
   $json = json_encode($data, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
-  if ($json === false) throw new RuntimeException('chats_save: json_encode failed');
+  if (!is_string($json)) {
+    // не кидаємо фатал, щоб API не падало
+    return;
+  }
 
   $tmp = $p . '.tmp';
   $fp = fopen($tmp, 'wb');
-  if (!$fp) throw new RuntimeException('chats_save: cannot open tmp');
-  if (!flock($fp, LOCK_EX)) { fclose($fp); throw new RuntimeException('chats_save: cannot lock tmp'); }
+  if (!$fp) return;
+
+  if (!flock($fp, LOCK_EX)) {
+    fclose($fp);
+    @unlink($tmp);
+    return;
+  }
 
   fwrite($fp, $json);
   fflush($fp);
