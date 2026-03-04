@@ -180,7 +180,7 @@ if (!is_array($u)) {
  * Для BUY краще лишити тільки success/processed/ok.
  */
 $okBuy   = ['success', 'processed', 'ok'];
-$okTrial = ['success', 'processed', 'ok', 'hold', 'processing'];
+$okTrial = ['created','success','processed','ok','hold','processing'];
 
 if ($mode === 'trial' || $mode === 'trial_charge') {
   if (!in_array($status, $okTrial, true)) {
