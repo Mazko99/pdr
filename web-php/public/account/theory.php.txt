@@ -184,7 +184,16 @@ if ($uid !== '' && $topic !== '' && (string)($_GET['done'] ?? '') === '1') {
       if (!is_array($u)) $u = [];
       if (!isset($u['theory_done']) || !is_array($u['theory_done'])) $u['theory_done'] = [];
       $u['theory_done'][$topic] = true;
-      progress_user_set($uid, $u);
+
+// ✅ дублюємо slug-ключ, щоб точно збіглося з перевіркою quiz.php
+if (function_exists('slugify_ua')) {
+  $slug = slugify_ua($topic);
+  if (is_string($slug) && $slug !== '') {
+    $u['theory_done'][$slug] = true;
+  }
+}
+
+progress_user_set($uid, $u);
   } else {
       // fallback JSON
       $u = user_progress_get($uid);
