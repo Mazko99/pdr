@@ -1817,3 +1817,18 @@ a.btn--black *{
     -webkit-text-fill-color:#fff !important;
   }
 }
+/* =====================================
+   MOBILE FIX — green action button text
+   ===================================== */
+
+@media (max-width:768px){
+
+  /* кнопка "Обери відповідь" */
+  .pp-bottom button:last-child,
+  .pp-bottom button:last-child span,
+  .pp-bottom button:last-child *{
+    color:#fff !important;
+    -webkit-text-fill-color:#fff !important;
+  }
+
+}
