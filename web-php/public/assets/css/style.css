@@ -1480,3 +1480,82 @@ body.quiz-page .tests-topbar {
   }
 
 }
+/* ================= FIX: PLAN SPACING + CTA ROW ================= */
+
+/* 1) Нормальні відступи всередині плану */
+.plan { 
+  padding: 28px !important;
+}
+
+.plan__title { 
+  margin: 0 0 14px 0 !important;
+  line-height: 1.2;
+}
+
+.plan__desc { 
+  margin: 0 0 18px 0 !important;
+  line-height: 1.55;
+}
+
+.plan__price { 
+  margin: 0 0 16px 0 !important;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.plan__banner { 
+  margin: 0 0 18px 0 !important;
+  padding: 14px 16px !important;
+}
+
+.plan__list { 
+  margin: 0 0 20px 0 !important;
+  padding-left: 18px !important;
+}
+
+.plan__list li {
+  margin: 0 0 10px 0 !important;
+}
+
+/* 2) ВИПРАВЛЕННЯ: якщо в тебе десь випадково "plan  cta-row" або інші варіанти */
+.plan__cta-row,
+.plan .plan__cta-row,
+.plan .cta-row,
+.plan .plan__cta,
+.plan .plan__cta-row {
+  display: flex !important;
+  gap: 12px !important;
+  margin-top: 18px !important;
+  align-items: stretch !important;
+}
+
+/* 3) Форми й кнопки в ряд — завжди однакова ширина */
+.plan__cta-row form,
+.plan .cta-row form,
+.plan .plan__cta-row form {
+  flex: 1 1 0 !important;
+  margin: 0 !important;
+}
+
+.plan__cta-row button,
+.plan .cta-row button,
+.plan .plan__cta-row button {
+  width: 100% !important;
+  min-height: 44px !important;
+  white-space: nowrap;
+}
+
+/* 4) Якщо браузер додає зайві відступи в form (таке буває) */
+.plan__cta-row form * {
+  margin-top: 0;
+}
+
+/* 5) На вузьких екранах — кнопки одна під одною */
+@media (max-width: 520px) {
+  .plan__cta-row,
+  .plan .cta-row,
+  .plan .plan__cta-row {
+    flex-direction: column !important;
+  }
+}
