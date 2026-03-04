@@ -77,6 +77,8 @@ if (session_status() !== PHP_SESSION_ACTIVE) {
 }
 
 require_once __DIR__ . '/db.php';
+$ss = __DIR__ . '/sessions_store.php';
+if (is_file($ss)) require_once $ss;
 
 function db(): PDO {
 
@@ -144,11 +146,19 @@ function auth_user_id(): ?string {
 function auth_login(string $userId): void {
   $_SESSION['user_id'] = $userId;
 }
+if (function_exists('session_register_current')) {
+  session_register_current((string)$uid);
+}
 
 function auth_logout(): void {
   unset($_SESSION['user_id'], $_SESSION['has_access'], $_SESSION['plan']);
 }
 
+// ✅ оновлюємо last_seen для активної сесії
+$__uid = auth_user_id();
+if ($__uid && function_exists('session_touch_current')) {
+  session_touch_current((string)$__uid);
+}
 // -------------------- Device policy include (once) --------------------
 $dsFile = __DIR__ . '/device_sessions.php';
 if (is_file($dsFile)) {

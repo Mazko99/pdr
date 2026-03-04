@@ -1692,36 +1692,9 @@ body.quiz-page .tests-topbar {
     -webkit-text-fill-color: #111 !important;
     opacity: 1 !important;
   }
-/* =====================================
-   QUIZ BUTTON TEXT COLORS
-   ===================================== */
-
-/* білі кнопки відповідей */
-.pp-option,
-.pp-option button,
-.pp-option span,
-.pp-option div{
-  color:#111 !important;
-  -webkit-text-fill-color:#111 !important;
-}
-
-/* зелена кнопка вибраної відповіді */
-.pp-option.is-selected,
-.pp-option.correct,
-.pp-option.active{
-  color:#fff !important;
-}
-
-/* кнопки дій (зелені) */
-.pp-btn--primary,
-.pp-btn--success,
-button.btn--green{
-  color:#fff !important;
-}
-
-/* якщо кнопка має зелений background */
-button[style*="background"],
-button.green,
-button.success{
-  color:#fff !important;
+/* зелена кнопка дії (Завершити / Обери відповідь) */
+@media (max-width:768px){
+  .pp-bottom .pp-actions button{
+    color:#fff !important;
+  }
 }
