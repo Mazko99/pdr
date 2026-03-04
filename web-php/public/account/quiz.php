@@ -558,9 +558,9 @@ if ($mode === 'exam' || $mode === 'exam_mix') {
         // ===== TRAINER =====
         if ($mode === 'trainer' || $mode === 'trainer_mix' || $mode === 'trainer_topic') {
             $title = 'Тренажер';
-            $timeLimit = 0; // ✅ unlimited
-            $maxMistakes = null;     // ✅ unlimited (не показувати "/999999")
-            $mistakesAllowed = null; // ✅ unlimited (для нового рендера)
+            $timeLimit = 0;        // unlimited
+            $maxMistakes = null;   // unlimited
+            $mistakesAllowed = null; // unlimited
 
             if ($mode === 'trainer_topic') {
                 if ($topicReq === '' || !isset($topicPools[$topicReq]) || !is_array($topicPools[$topicReq])) {
@@ -892,19 +892,25 @@ if ($timeLimit > 0 && $spent > $timeLimit) {
 
 $mistakes = quiz_count_mistakes($quiz);
 
-$allowed = $quiz['mistakes_allowed'] ?? null;
-$allowed = is_null($allowed) ? null : (int)$allowed;
+$modeNow = (string)($quiz['mode'] ?? '');
+$isTrainer = (strpos($modeNow, 'trainer') === 0);
 
-if ($allowed !== null) {
-    if ($mistakes > $allowed) {
-        quiz_redirect('/account/quiz.php?action=finish');
+if (!$isTrainer) {
+
+    $allowed = $quiz['mistakes_allowed'] ?? null;
+    $allowed = is_null($allowed) ? null : (int)$allowed;
+
+    if ($allowed !== null) {
+        if ($mistakes > $allowed) {
+            quiz_redirect('/account/quiz.php?action=finish');
+        }
+    } else {
+        $maxMistakes = (int)($quiz['max_mistakes'] ?? 3);
+        if ($mistakes >= $maxMistakes) {
+            quiz_redirect('/account/quiz.php?action=finish');
+        }
     }
-    $maxMistakes = $allowed; // ✅ для UI покажемо “/2”
-} else {
-    $maxMistakes = (int)($quiz['max_mistakes'] ?? 3);
-    if ($mistakes >= $maxMistakes) {
-        quiz_redirect('/account/quiz.php?action=finish');
-    }
+
 }
 
 $csrf = csrf_token();
