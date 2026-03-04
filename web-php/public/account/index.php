@@ -89,12 +89,36 @@ if (!empty($_SESSION['has_access']) && $hasAccess === false) {
 }
 
 // ---- Заглушка підписок ----
-$subscription = [
-  'plan' => '—',
-  'status' => '—',
-  'expires_at' => '—',
+// ---- ПІДПИСКА (замість заглушки) ----
+$planCode = is_array($user) ? (string)($user['plan'] ?? 'free') : 'free';
+$expRaw   = is_array($user) ? (string)($user['expires_at'] ?? '') : '';
+
+$planTitles = [
+  'free'   => 'Безкоштовний',
+  'basic'  => 'Базовий (30 днів / підписка)',
+  'mini12' => 'План на 12 днів',
+  'dev'    => 'Dev',
+  '12d'    => 'План на 12 днів',
+  'base'   => 'Базовий (30 днів / підписка)',
 ];
 
+$expiresText = '—';
+$expTs = $expRaw !== '' ? strtotime($expRaw) : false;
+if ($expTs) {
+  // показуємо у форматі, який зрозумілий людині
+  $expiresText = date('d.m.Y H:i', $expTs);
+}
+
+$isActive = user_has_access_local($user);
+
+$subscription = [
+  'plan'       => $planTitles[$planCode] ?? ($planCode !== '' ? $planCode : '—'),
+  'status'     => $isActive ? 'Активна' : 'Не активна',
+  'expires_at' => $expiresText,
+];
+
+// (опційно) якщо тобі треба окремо в шаблоні
+// $subscriptionActive = $isActive;
 // ---- progress.json (помилки + пройдені тести) ----
 function progress_path(): string {
   return dirname(__DIR__, 2) . '/storage/progress.json';
