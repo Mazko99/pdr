@@ -436,50 +436,38 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $qIds = [];
          
         <?php
-// ======================= DEBUG (TEMP) =======================
-if (!function_exists('ppdr_slugify_ua')) {
-  function ppdr_slugify_ua(string $s): string {
-    $s = trim($s);
-    if ($s === '') return '';
-    $map = [
-      'А'=>'A','Б'=>'B','В'=>'V','Г'=>'H','Ґ'=>'G','Д'=>'D','Е'=>'E','Є'=>'Ye','Ж'=>'Zh','З'=>'Z','И'=>'Y','І'=>'I','Ї'=>'Yi','Й'=>'Y','К'=>'K','Л'=>'L','М'=>'M','Н'=>'N','О'=>'O','П'=>'P','Р'=>'R','С'=>'S','Т'=>'T','У'=>'U','Ф'=>'F','Х'=>'Kh','Ц'=>'Ts','Ч'=>'Ch','Ш'=>'Sh','Щ'=>'Shch','Ю'=>'Yu','Я'=>'Ya',
-      'а'=>'a','б'=>'b','в'=>'v','г'=>'h','ґ'=>'g','д'=>'d','е'=>'e','є'=>'ye','ж'=>'zh','з'=>'z','и'=>'y','і'=>'i','ї'=>'yi','й'=>'y','к'=>'k','л'=>'l','м'=>'m','н'=>'n','о'=>'o','п'=>'p','р'=>'r','с'=>'s','т'=>'t','у'=>'u','ф'=>'f','х'=>'kh','ц'=>'ts','ч'=>'ch','ш'=>'sh','щ'=>'shch','ю'=>'yu','я'=>'ya',
-      'Ь'=>'','ь'=>'','Ъ'=>'','ъ'=>'','’'=>'', '\''=>'',
-      '«'=>'','»'=>'',
-    ];
-    $s = strtr($s, $map);
-    $s = preg_replace('~[^a-zA-Z0-9]+~', '-', $s);
-    $s = trim((string)$s, '-');
-    return strtolower($s);
-  }
+<?php
+// ===== DEBUG THEORY GATE (TEMP) =====
+$__uid_dbg = (string)($uid ?? ($_SESSION['uid'] ?? $_SESSION['user_id'] ?? ''));
+$__topic_dbg = trim((string)($topic ?? ($needTheoryTopic ?? ($_SESSION['quiz']['topic'] ?? ($_SESSION['quiz']['meta']['topic'] ?? '')))));
+
+function __ppdr_slugify_ua(string $s): string {
+  $s = trim($s);
+  if ($s === '') return '';
+  $map = [
+    'А'=>'A','Б'=>'B','В'=>'V','Г'=>'H','Ґ'=>'G','Д'=>'D','Е'=>'E','Є'=>'Ye','Ж'=>'Zh','З'=>'Z','И'=>'Y','І'=>'I','Ї'=>'Yi','Й'=>'Y','К'=>'K','Л'=>'L','М'=>'M','Н'=>'N','О'=>'O','П'=>'P','Р'=>'R','С'=>'S','Т'=>'T','У'=>'U','Ф'=>'F','Х'=>'Kh','Ц'=>'Ts','Ч'=>'Ch','Ш'=>'Sh','Щ'=>'Shch','Ю'=>'Yu','Я'=>'Ya',
+    'а'=>'a','б'=>'b','в'=>'v','г'=>'h','ґ'=>'g','д'=>'d','е'=>'e','є'=>'ye','ж'=>'zh','з'=>'z','и'=>'y','і'=>'i','ї'=>'yi','й'=>'y','к'=>'k','л'=>'l','м'=>'m','н'=>'n','о'=>'o','п'=>'p','р'=>'r','с'=>'s','т'=>'t','у'=>'u','ф'=>'f','х'=>'kh','ц'=>'ts','ч'=>'ch','ш'=>'sh','щ'=>'shch','ю'=>'yu','я'=>'ya',
+    'Ь'=>'','ь'=>'','Ъ'=>'','ъ'=>'','’'=>'', '\''=>'',
+    '«'=>'','»'=>'',
+  ];
+  $s = strtr($s, $map);
+  $s = preg_replace('~[^a-zA-Z0-9]+~', '-', $s);
+  $s = trim((string)$s, '-');
+  return strtolower($s);
 }
 
-$__uid_dbg = $uid ?? ($_SESSION['uid'] ?? $_SESSION['user_id'] ?? '');
-$__uid_dbg = (string)$__uid_dbg;
+$__slug_dbg = $__topic_dbg !== '' ? __ppdr_slugify_ua($__topic_dbg) : '';
 
 $__prog_dbg = [];
 $__theory_map = [];
-$__topic_dbg = '';
-$__slug_dbg  = '';
-$__has_topic_key = null;
-$__has_slug_key  = null;
-
 if (function_exists('progress_user_get') && $__uid_dbg !== '') {
   $__prog_dbg = progress_user_get($__uid_dbg);
-  if (is_array($__prog_dbg['theory_done'] ?? null)) {
-    $__theory_map = $__prog_dbg['theory_done'];
-  }
+  if (is_array($__prog_dbg['theory_done'] ?? null)) $__theory_map = $__prog_dbg['theory_done'];
 }
 
-// спроба визначити topic який блокує (беремо з того ж місця, що й твій блокатор)
-$__topic_dbg = (string)($topic ?? ($needTheoryTopic ?? ($_SESSION['quiz']['topic'] ?? ($_SESSION['quiz']['meta']['topic'] ?? ''))));
-$__topic_dbg = trim($__topic_dbg);
-$__slug_dbg = $__topic_dbg !== '' ? ppdr_slugify_ua($__topic_dbg) : '';
+$__has_topic = ($__topic_dbg !== '' && isset($__theory_map[$__topic_dbg]));
+$__has_slug  = ($__slug_dbg !== '' && isset($__theory_map[$__slug_dbg]));
 
-$__has_topic_key = ($__topic_dbg !== '' && isset($__theory_map[$__topic_dbg]));
-$__has_slug_key  = ($__slug_dbg !== '' && isset($__theory_map[$__slug_dbg]));
-
-// сесія квіза (обрізаємо щоб не було мегапростин)
 $__sess_quiz_dbg = $_SESSION['quiz'] ?? null;
 if (is_array($__sess_quiz_dbg)) {
   $copy = $__sess_quiz_dbg;
@@ -489,8 +477,25 @@ if (is_array($__sess_quiz_dbg)) {
   }
   $__sess_quiz_dbg = $copy;
 }
-// ============================================================
-?>
+
+header('Content-Type: text/plain; charset=utf-8');
+echo "DEBUG theory gate\n";
+echo "uid: {$__uid_dbg}\n";
+echo "topic expected: {$__topic_dbg}\n";
+echo "slug(topic): {$__slug_dbg}\n";
+echo "theory_done has TOPIC key: " . var_export($__has_topic, true) . "\n";
+echo "theory_done has SLUG key : " . var_export($__has_slug, true) . "\n";
+echo "theory_done keys (first 50):\n";
+$keys = array_keys($__theory_map);
+sort($keys);
+$keys = array_slice($keys, 0, 50);
+print_r($keys);
+echo "\nprogress_user_get:\n";
+print_r($__prog_dbg);
+echo "\nSESSION[quiz] trimmed:\n";
+print_r($__sess_quiz_dbg);
+exit;
+// ===== END DEBUG =====
 <div style="max-width:1100px;margin:20px auto;padding:14px;border:2px dashed #c00;border-radius:12px;font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;background:#fff;">
   <div style="font-weight:900;color:#c00;margin-bottom:8px;">DEBUG: theory gate</div>
 
