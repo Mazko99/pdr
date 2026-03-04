@@ -152,13 +152,20 @@ if (!is_array($questions)) $questions = [];
  * ✅ Прогрес користувача (галочки біля складених тестів)
  * Зберігається у public/storage/progress.json (як у quiz.php)
  */
-$uProg = progress_get_user((string)$uid);
+$uProg = progress_user_get((string)$uid);
 $passedTests = $uProg['passed_tests'] ?? [];
 if (!is_array($passedTests)) $passedTests = [];
 
 $theoryDoneMap = $uProg['theory_done'] ?? [];
 if (!is_array($theoryDoneMap)) $theoryDoneMap = [];
 
+$uProg = progress_user_get((string)$uid);
+
+$passedTestsMap = $uProg['passed_tests'] ?? [];
+if (!is_array($passedTestsMap)) $passedTestsMap = [];
+
+$theoryDoneMap = $uProg['theory_done'] ?? [];
+if (!is_array($theoryDoneMap)) $theoryDoneMap = [];
 /**
  * ✅ Обрізаємо список тестів/тем:
  * залишаємо все по порядку ДО і ВКЛЮЧНО теми CUTOFF_TOPIC.
@@ -304,86 +311,36 @@ $csrf = csrf_token();
       <!-- =========================
            ІСПИТИ
            ========================= -->
-      <div class="topic-block">
-        <div class="topic-block__head">
-          <h3 class="h3">Змішаний іспит (всі теми)</h3>
-        </div>
+      <?php if ($mode === 'exam'): ?>
 
-        <?php
-          // ✅ змішаний іспит доступний тільки після того, як користувач склав ВСІ тести (по всіх темах)
-          $mixedUnlocked = all_tests_passed(array_keys($allTestIds), $passedTests);
-        ?>
+  <div class="topic-block">
+    <div class="topic-block__head">
+      <h3 class="h3">Іспит</h3>
+    </div>
 
-        <div class="test-card">
-          <div class="test-card__left">
-            <div class="test-card__title">Змішаний іспит</div>
-            <div class="test-card__meta">
-              <span>Питань: <b><?php echo (int)EXAM_QUESTIONS; ?></b></span>
-              <span>Час: <b><?php echo (int)round(EXAM_TIME_SEC/60); ?> хв</b></span>
-              <span>Помилок: <b><?php echo (int)EXAM_MISTAKES; ?></b></span>
-            </div>
-          </div>
-          <div class="test-card__right">
-            <form method="post" action="/account/quiz.php">
-              <input type="hidden" name="csrf" value="<?php echo h($csrf); ?>">
-              <input type="hidden" name="action" value="start">
-              <input type="hidden" name="mode" value="exam_mix">
-              <input type="hidden" name="seed" value="<?php echo (int)random_int(1, 1000000000); ?>">
-              <button class="btn btn--primary" type="submit" <?php echo $mixedUnlocked ? '' : 'disabled style="opacity:.55;cursor:not-allowed;"'; ?>>
-                <?php echo $mixedUnlocked ? 'Почати змішаний іспит →' : 'Почати (заблоковано)'; ?>
-              </button>
-            </form>
-          </div>
+    <div class="test-card">
+      <div class="test-card__left">
+        <div class="test-card__title">Почати іспит</div>
+        <div class="test-card__meta">
+          <span>Питань: <b><?php echo (int)EXAM_QUESTIONS; ?></b></span>
+          <span>Час: <b><?php echo (int)round(EXAM_TIME_SEC/60); ?> хв</b></span>
+          <span>Помилок: <b><?php echo (int)EXAM_MISTAKES; ?></b></span>
         </div>
       </div>
 
-      <?php foreach ($topicPools as $topicName => $pool): ?>
-        <?php
-          $total = count($pool);
-          if ($total < 1) continue;
+      <div class="test-card__right">
+        <form method="post" action="/account/quiz.php">
+          <input type="hidden" name="csrf" value="<?php echo h($csrf); ?>">
+          <input type="hidden" name="action" value="start">
+          <input type="hidden" name="mode" value="exam">
+          <input type="hidden" name="seed" value="<?php echo (int)random_int(1, 1000000000); ?>">
+          <button class="btn btn--primary" type="submit">Почати →</button>
+        </form>
+      </div>
+    </div>
+  </div>
 
-          $parts = (int)ceil($total / EXAM_QUESTIONS);
-          if ($parts < 1) $parts = 1;
-
-          // ✅ відкриваємо іспити по темі тільки після того, як користувач склав ВСІ тести цієї теми
-          $topicUnlocked = all_tests_passed($topicTestIds[$topicName] ?? [], $passedTests);
-        ?>
-
-        <div class="topic-block">
-          <div class="topic-block__head">
-            <h3 class="h3"><?php echo h($topicName); ?></h3>
-          </div>
-
-          <div class="topic-tests">
-            <?php for ($p = 1; $p <= $parts; $p++): ?>
-              <div class="test-card">
-                <div class="test-card__left">
-                  <div class="test-card__title">Іспит <?php echo (int)$p; ?></div>
-                  <div class="test-card__meta">
-                    <span>Питань: <b><?php echo (int)EXAM_QUESTIONS; ?></b></span>
-                    <span>Час: <b><?php echo (int)round(EXAM_TIME_SEC/60); ?> хв</b></span>
-                    <span>Помилок: <b><?php echo (int)EXAM_MISTAKES; ?></b></span>
-                  </div>
-                </div>
-                <div class="test-card__right">
-                  <form method="post" action="/account/quiz.php">
-                    <input type="hidden" name="csrf" value="<?php echo h($csrf); ?>">
-                    <input type="hidden" name="action" value="start">
-                    <input type="hidden" name="mode" value="exam_topic">
-                    <input type="hidden" name="topic" value="<?php echo h($topicName); ?>">
-                    <input type="hidden" name="part" value="<?php echo (int)$p; ?>">
-                    <input type="hidden" name="seed" value="<?php echo (int)random_int(1, 1000000000); ?>">
-                    <button class="btn btn--primary" type="submit" <?php echo $topicUnlocked ? '' : 'disabled style="opacity:.55;cursor:not-allowed;"'; ?>>
-                      <?php echo $topicUnlocked ? 'Почати →' : 'Почати (заблоковано)'; ?>
-                    </button>
-                  </form>
-                </div>
-              </div>
-            <?php endfor; ?>
-          </div>
-        </div>
-
-      <?php endforeach; ?>
+<?php elseif ($mode === 'trainer'): ?>
 
 
     <?php elseif ($mode === 'trainer'): ?>

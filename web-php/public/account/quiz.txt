@@ -363,8 +363,7 @@ function build_exam20_questions(array $topicPools, int $seed): array {
     $vehIds = array_keys($veh);
 
     // choose vehicle count: 3 if possible else 2
-    $vehNeed = (count($vehIds) >= 3) ? 3 : 2;
-    if (count($vehIds) < 2) $vehNeed = min(2, count($vehIds));
+    $vehNeed = min(2, count($vehIds)); // рівно 2 (якщо є)
 
     $medNeed = min(2, count($medIds));
 
