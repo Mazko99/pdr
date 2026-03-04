@@ -7,13 +7,15 @@ require_once __DIR__ . '/db.php';
 /**
  * Progress store (Postgres, Railway)
  *
- * Drop-in API (під твої старі виклики):
+ * Основний API:
  * - progress_add_mistakes(string $uid, int $testId, array $qids): void
  * - progress_mark_passed(string $uid, int $testId): void
  * - progress_all_mistakes_ids(string $uid): array
- *
- * + helpers:
  * - progress_user_mistakes_by_test(string $uid): array<int, array<int>>
+ *
+ * Compatibility API (щоб не ламати старий код quiz.php/tests.php):
+ * - progress_user_get(string $uid): array  -> повертає ['passed_tests'=>map, 'theory_done'=>map]
+ * - progress_user_set(string $uid, array $u): void
  */
 
 function pdoi(): PDO {
@@ -22,6 +24,7 @@ function pdoi(): PDO {
   return $pdo;
 }
 
+/** Базові таблиці: складені тести + помилки */
 function progress_ensure_schema(PDO $pdo): void {
   // складені тести
   $pdo->exec("
@@ -36,26 +39,46 @@ function progress_ensure_schema(PDO $pdo): void {
   // помилки по питаннях
   $pdo->exec("
     CREATE TABLE IF NOT EXISTS user_test_mistakes (
-      user_id    TEXT NOT NULL,
-      test_id    INT  NOT NULL,
-      question_id INT NOT NULL,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      user_id     TEXT NOT NULL,
+      test_id     INT  NOT NULL,
+      question_id INT  NOT NULL,
+      created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       PRIMARY KEY (user_id, test_id, question_id)
     );
   ");
 
-  // індекси (опційно, але корисно)
+  // індекси
   $pdo->exec("CREATE INDEX IF NOT EXISTS idx_mistakes_user ON user_test_mistakes(user_id);");
   $pdo->exec("CREATE INDEX IF NOT EXISTS idx_mistakes_test ON user_test_mistakes(test_id);");
+
+  // таблиця теорії (compat)
+  progress_ensure_theory_schema($pdo);
+}
+
+/** Таблиця для “теорія пройдена” */
+function progress_ensure_theory_schema(PDO $pdo): void {
+  $pdo->exec("
+    CREATE TABLE IF NOT EXISTS user_theory_done (
+      user_id TEXT NOT NULL,
+      item    TEXT NOT NULL,
+      done_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (user_id, item)
+    );
+  ");
+  $pdo->exec("CREATE INDEX IF NOT EXISTS idx_theory_user ON user_theory_done(user_id);");
 }
 
 /**
  * Додає помилки (question IDs) до тесту.
+ * ✅ FIX: дозволяємо testId=0 (екзамен/мікс), раніше було <=0 і все ігнорувалось
  * Дублікати ігноруються завдяки PRIMARY KEY.
  */
 function progress_add_mistakes(string $uid, int $testId, array $qids): void {
   $uid = trim($uid);
-  if ($uid === '' || $testId <= 0) return;
+  if ($uid === '') return;
+
+  // ✅ дозволяємо bucket 0
+  if ($testId < 0) $testId = 0;
 
   // чистимо список
   $clean = [];
@@ -149,4 +172,77 @@ function progress_user_mistakes_by_test(string $uid): array {
     $out[$tid][] = $qid;
   }
   return $out;
+}
+
+/* =======================================================================
+   Compatibility layer: progress_user_get / progress_user_set
+   ======================================================================= */
+
+/**
+ * Повертає прогрес у форматі, який очікує старий код:
+ * [
+ *   'passed_tests' => ['12'=>true, '13'=>true, ...],
+ *   'theory_done'  => ['topic_x'=>true, ...]
+ * ]
+ */
+function progress_user_get(string $uid): array {
+  $uid = trim($uid);
+  if ($uid === '') return ['passed_tests' => [], 'theory_done' => []];
+
+  $pdo = pdoi();
+
+  // passed_tests
+  $st = $pdo->prepare("SELECT test_id FROM user_passed_tests WHERE user_id = :u");
+  $st->execute([':u' => $uid]);
+  $passed = [];
+  foreach ($st->fetchAll(PDO::FETCH_COLUMN) as $tid) {
+    $passed[(string)(int)$tid] = true;
+  }
+
+  // theory_done
+  $st = $pdo->prepare("SELECT item FROM user_theory_done WHERE user_id = :u");
+  $st->execute([':u' => $uid]);
+  $theory = [];
+  foreach ($st->fetchAll(PDO::FETCH_COLUMN) as $it) {
+    $theory[(string)$it] = true;
+  }
+
+  return [
+    'passed_tests' => $passed,
+    'theory_done'  => $theory,
+  ];
+}
+
+/**
+ * Приймає масив прогресу і синхронізує його в БД.
+ * Старий код інколи викликає set() з цілими мапами.
+ */
+function progress_user_set(string $uid, array $u): void {
+  $uid = trim($uid);
+  if ($uid === '') return;
+
+  $pdo = pdoi();
+
+  // 1) passed_tests
+  if (isset($u['passed_tests']) && is_array($u['passed_tests'])) {
+    foreach ($u['passed_tests'] as $testId => $flag) {
+      if ($flag) {
+        progress_mark_passed($uid, (int)$testId);
+      }
+    }
+  }
+
+  // 2) theory_done
+  if (isset($u['theory_done']) && is_array($u['theory_done'])) {
+    $st = $pdo->prepare("
+      INSERT INTO user_theory_done (user_id, item)
+      VALUES (:u, :i)
+      ON CONFLICT (user_id, item) DO NOTHING
+    ");
+    foreach ($u['theory_done'] as $item => $flag) {
+      $item = trim((string)$item);
+      if ($item === '' || !$flag) continue;
+      $st->execute([':u' => $uid, ':i' => $item]);
+    }
+  }
 }
