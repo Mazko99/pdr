@@ -22,29 +22,41 @@ function log_line(string $file, string $line): void {
   @file_put_contents($file, $msg . "\n", FILE_APPEND);
 }
 
+/**
+ * Нормалізація планів до ЄДИНИХ кодів у проекті:
+ * - basic  (30 днів)
+ * - mini12 (12 днів)
+ *
+ * Підтримує старі/зовнішні значення:
+ * base -> basic
+ * 12d/personal -> mini12
+ */
 function norm_plan(string $p): string {
   $p = trim(strtolower($p));
-  $map = [
-    '30' => 'base',
-    '30d' => 'base',
-    'base' => 'base',
 
-    '12' => '12d',
-    '12d' => '12d',
-    'personal' => '12d',   // якщо твій 12-денний план називається personal у checkout
-    'trial12' => '12d',
+  $map = [
+    '30' => 'basic',
+    '30d' => 'basic',
+    'base' => 'basic',
+    'basic' => 'basic',
+
+    '12' => 'mini12',
+    '12d' => 'mini12',
+    'personal' => 'mini12',
+    'mini12' => 'mini12',
+    'trial12' => 'mini12',
   ];
+
   return $map[$p] ?? $p;
 }
 
 function extract_user_id_from_ref(string $ref): string {
-  // шукаємо найбільш схоже на id користувача (цифри або uuid-подібне)
   // 1) якщо у тебе id цифрами
   if (preg_match('~(?:^|_)(\d{1,20})(?:_|$)~', $ref, $m)) {
     return (string)$m[1];
   }
-  // 2) якщо колись зробиш uuid — витягне теж
-  if (preg_match('~(?:^|_)([a-f0-9]{8,})(?:_|$)~i', $ref, $m2)) {
+  // 2) якщо у тебе hex id (як у users.json)
+  if (preg_match('~(?:^|_)([a-f0-9]{16,})(?:_|$)~i', $ref, $m2)) {
     return (string)$m2[1];
   }
   return '';
@@ -85,7 +97,7 @@ if (!is_array($data)) {
   exit;
 }
 
-// (опційно) signature verify
+// (опційно) signature verify — РЕКОМЕНДУЮ ВКЛЮЧИТИ КОЛИ ВСЕ ЗАПРАЦЮЄ
 // if (!mono_verify_webhook($raw, $headers)) {
 //   log_line($logFile, "BAD SIGNATURE");
 //   http_response_code(403);
@@ -112,23 +124,20 @@ $userId = '';
 $mode = '';
 $plan = '';
 
-// --- РОЗШИРЕНИЙ ПАРСИНГ reference ---
-// підтримуємо твої формати + запасні
-// 1) buy_{plan}_{userId}_{ts}
+// --- ПАРСИНГ reference ---
+// 1) buy_{planKey}_{userId}_{ts}  де planKey = basic|mini12
 if (str_starts_with($ref, 'buy_')) {
   $mode = 'buy';
   $parts = explode('_', $ref);
   $plan = (string)($parts[1] ?? '');
   $userId = (string)($parts[2] ?? '');
 }
-
 // 2) trial_bind_{userId}_{ts}
 elseif (str_starts_with($ref, 'trial_bind_')) {
   $mode = 'trial';
   $parts = explode('_', $ref);
   $userId = (string)($parts[2] ?? '');
 }
-
 // 3) trial_charge_{plan}_{userId}_{ts}
 elseif (str_starts_with($ref, 'trial_charge_')) {
   $mode = 'trial_charge';
@@ -136,21 +145,17 @@ elseif (str_starts_with($ref, 'trial_charge_')) {
   $plan = (string)($parts[2] ?? '');
   $userId = (string)($parts[3] ?? '');
 }
-
-// 4) fallback: якщо ref типу trial_{plan}_{userId}_{ts} або checkout_{...}
+// 4) fallback: якщо ref містить trial / checkout
 elseif (str_contains($ref, 'trial')) {
-  // пробуємо витягнути userId з рядка
   $mode = 'trial';
   $userId = extract_user_id_from_ref($ref);
-  // пробуємо витягнути план як base/personal/12/30 якщо він є в ref
-  if (preg_match('~(?:^|_)(base|personal|12d|12|30|30d)(?:_|$)~i', $ref, $m)) {
+  if (preg_match('~(?:^|_)(base|basic|personal|mini12|12d|12|30|30d)(?:_|$)~i', $ref, $m)) {
     $plan = (string)$m[1];
   }
 }
 elseif (str_contains($ref, 'checkout') || str_contains($ref, 'order')) {
-  // краще хоч так, ніж нуль
   $userId = extract_user_id_from_ref($ref);
-  if ($userId !== '') $mode = 'buy'; // або trial — якщо в ref є trial, але вище вже зловили
+  if ($userId !== '') $mode = 'buy';
 }
 
 // нормалізуємо plan
@@ -174,13 +179,12 @@ if (!is_array($u)) {
 }
 
 /**
- * ВАЖЛИВО:
- * Для прив'язки (trial_hold 1 грн) mono часто шле статус не тільки "success".
- * Тому для TRIAL дозволяємо: success/processed/ok/hold/processing
- * Для BUY краще лишити тільки success/processed/ok.
+ * ✅ ВАЖЛИВО:
+ * - 'created' НЕ Є ОПЛАТОЮ! (інвойс тільки створений)
+ * - даємо доступ тільки на успішних статусах
  */
 $okBuy   = ['success', 'processed', 'ok'];
-$okTrial = ['created','success','processed','ok','hold','processing'];
+$okTrial = ['success', 'processed', 'ok', 'hold', 'processing'];
 
 if ($mode === 'trial' || $mode === 'trial_charge') {
   if (!in_array($status, $okTrial, true)) {
@@ -189,29 +193,31 @@ if ($mode === 'trial' || $mode === 'trial_charge') {
     echo 'ok';
     exit;
   }
-} else {
+} elseif ($mode === 'buy') {
   if (!in_array($status, $okBuy, true)) {
     log_line($logFile, "EXIT: BUY status not ok ({$status})");
     http_response_code(200);
     echo 'ok';
     exit;
   }
+} else {
+  log_line($logFile, "EXIT: UNKNOWN MODE ({$mode})");
+  http_response_code(200);
+  echo 'ok';
+  exit;
 }
 
+// ============================
 // BUY
-// BUY
+// ============================
 if ($mode === 'buy') {
   $chosen = $plan !== '' ? $plan : (string)($u['buy_pending_plan'] ?? 'basic');
-  // нормалізація під твої коди
+  $chosen = norm_plan($chosen);
   if ($chosen !== 'mini12' && $chosen !== 'basic') $chosen = 'basic';
 
-  if ($chosen === 'mini12') {
-    $u['plan'] = 'mini12';
-    $u['expires_at'] = gmdate('c', time() + 12 * 86400);
-  } else {
-    $u['plan'] = 'basic';
-    $u['expires_at'] = gmdate('c', time() + 30 * 86400);
-  }
+  $u['plan'] = $chosen;
+  $days = ($chosen === 'mini12') ? 12 : 30;
+  $u['expires_at'] = gmdate('c', time() + $days * 86400);
 
   $u['paid_at'] = gmdate('c');
   $u['plan_set_at'] = gmdate('c');
@@ -227,30 +233,48 @@ if ($mode === 'buy') {
   echo 'ok';
   exit;
 }
-// TRIAL (включно з fallback trial_...)
+
+// ============================
 // TRIAL
-$pendingPlan = (string)($u['trial_pending_plan'] ?? 'basic');
-if ($pendingPlan !== 'basic' && $pendingPlan !== 'mini12') $pendingPlan = 'basic';
+// ============================
+if ($mode === 'trial') {
+  // trial_bind ref не містить плану, тому беремо з trial_pending_plan, яку setить create.php (basic|mini12)
+  $pendingPlan = norm_plan((string)($u['trial_pending_plan'] ?? 'basic'));
+  if ($pendingPlan !== 'basic' && $pendingPlan !== 'mini12') $pendingPlan = 'basic';
 
-$u['trial_used'] = true;
-$u['trial_started_at'] = (string)($u['trial_started_at'] ?? gmdate('c'));
-$u['trial_expires_at'] = gmdate('c', time() + 3 * 86400);
-$u['trial_cancelled'] = false;
+  // якщо у fallback ref є plan — можемо використати (але trial_pending_plan все одно головне)
+  if ($plan === 'basic' || $plan === 'mini12') {
+    $pendingPlan = $plan;
+  }
 
-$u['plan'] = $pendingPlan;                 // ✅ basic|mini12
-$u['expires_at'] = (string)$u['trial_expires_at'];
+  $u['trial_used'] = true;
+  $u['trial_started_at'] = (string)($u['trial_started_at'] ?? gmdate('c'));
+  $u['trial_expires_at'] = gmdate('c', time() + 3 * 86400);
+  $u['trial_cancelled'] = false;
 
-$u['paid_at'] = gmdate('c');
-$u['plan_set_at'] = gmdate('c');
+  $u['plan'] = $pendingPlan; // ✅ basic|mini12
+  $u['expires_at'] = (string)$u['trial_expires_at'];
 
-user_upsert($u);
+  $u['paid_at'] = gmdate('c');
+  $u['plan_set_at'] = gmdate('c');
+
+  if ($cardToken !== '') {
+    $u['mono_card_token'] = $cardToken;
+  }
+
+  $u['trial_pending_invoice'] = null;
+
+  user_upsert($u);
 
   log_line($logFile, "TRIAL OK -> plan={$u['plan']} trial_expires_at={$u['trial_expires_at']}");
   http_response_code(200);
   echo 'ok';
   exit;
 }
-// trial_charge — просто ack (поки не використовуємо)
+
+// ============================
+// TRIAL_CHARGE (поки просто ACK)
+// ============================
 log_line($logFile, "TRIAL_CHARGE ACK");
 http_response_code(200);
 echo 'ok';

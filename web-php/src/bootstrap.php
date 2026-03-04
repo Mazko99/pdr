@@ -2,14 +2,19 @@
 declare(strict_types=1);
 
 /**
- * Простий .env loader (без бібліотек).
- * ВАЖЛИВО: завантажуємо .env ДО session_start(), щоб COOKIE_DOMAIN працював.
+ * ProstoPDR bootstrap.php
+ * - Loads .env BEFORE session_start (so COOKIE_DOMAIN works)
+ * - Starts one consistent session for www and non-www
+ * - Provides helpers: env(), redirect(), csrf_*, auth_*
+ * - Includes device_sessions.php once (if exists)
  */
+
+// -------------------- .env loader (NO libs) --------------------
 (function () {
   $candidates = [
     dirname(__DIR__) . '/.env',          // web-php/.env
-    dirname(__DIR__, 2) . '/.env',       // якщо структура інша
-    dirname(__DIR__) . '/public/.env',   // web-php/public/.env (на всяк)
+    dirname(__DIR__, 2) . '/.env',       // fallback if structure differs
+    dirname(__DIR__) . '/public/.env',   // optional
   ];
 
   $envFile = null;
@@ -31,7 +36,7 @@ declare(strict_types=1);
     $key = trim(substr($line, 0, $pos));
     $val = trim(substr($line, $pos + 1));
 
-    // прибираємо лапки якщо є
+    // strip quotes
     if (
       (str_starts_with($val, '"') && str_ends_with($val, '"')) ||
       (str_starts_with($val, "'") && str_ends_with($val, "'"))
@@ -39,7 +44,6 @@ declare(strict_types=1);
       $val = substr($val, 1, -1);
     }
 
-    // не перезаписуємо, якщо вже задано в середовищі
     if (getenv($key) === false) {
       putenv($key . '=' . $val);
       $_ENV[$key] = $val;
@@ -47,15 +51,12 @@ declare(strict_types=1);
   }
 })();
 
-/**
- * ✅ Єдиний правильний старт сесії для www і без www:
- * - domain = .prostopdr.com (з .env)
- * - secure визначаємо через HTTPS або X_FORWARDED_PROTO (Railway/Cloudflare)
- */
+// -------------------- Session (shared for www/non-www) --------------------
 if (session_status() !== PHP_SESSION_ACTIVE) {
   $cookieDomain = (string)(getenv('COOKIE_DOMAIN') ?: '');
 
-  $isHttps = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
+  $isHttps =
+    (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
     || ((string)($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https');
 
   $params = [
@@ -66,8 +67,9 @@ if (session_status() !== PHP_SESSION_ACTIVE) {
     'secure' => $isHttps,
   ];
 
+  // domain only if provided
   if ($cookieDomain !== '') {
-    $params['domain'] = $cookieDomain; // ✅ спільно для www і без www
+    $params['domain'] = $cookieDomain; // e.g. .prostopdr.com
   }
 
   session_set_cookie_params($params);
@@ -75,8 +77,8 @@ if (session_status() !== PHP_SESSION_ACTIVE) {
 }
 
 require_once __DIR__ . '/db.php';
-// users_store.php підключай у тих файлах, де потрібен (plan.php/email.php вже підключають)
 
+// -------------------- Helpers --------------------
 function env(string $key, ?string $default = null): ?string {
   $v = getenv($key);
   if ($v === false || $v === '') return $default;
@@ -104,9 +106,7 @@ function csrf_verify(?string $token): void {
   }
 }
 
-/**
- * ✅ FIX: user_id у тебе UUID/hex, тому тип має бути string.
- */
+// -------------------- Auth --------------------
 function auth_user_id(): ?string {
   $id = $_SESSION['user_id'] ?? null;
   if (!is_string($id) || $id === '') return null;
@@ -115,16 +115,13 @@ function auth_user_id(): ?string {
 
 function auth_login(string $userId): void {
   $_SESSION['user_id'] = $userId;
-  // has_access рахується у викликаючих файлах або через auth_refresh_access()
 }
 
 function auth_logout(): void {
-  unset($_SESSION['user_id']);
-  unset($_SESSION['has_access'], $_SESSION['plan']);
+  unset($_SESSION['user_id'], $_SESSION['has_access'], $_SESSION['plan']);
 }
 
-// ---- Device policy: single active session + 2 remembered devices
-// Підключай device_sessions.php ОДИН РАЗ (краще в bootstrap)
+// -------------------- Device policy include (once) --------------------
 $dsFile = __DIR__ . '/device_sessions.php';
 if (is_file($dsFile)) {
   require_once $dsFile;
@@ -136,7 +133,7 @@ function auth_enforce_device_policy(): void {
 
   if (!function_exists('ds_is_session_active')) return;
 
-  $sid = session_status() === PHP_SESSION_ACTIVE ? session_id() : '';
+  $sid = session_id();
   if ($sid === '') return;
 
   if (!ds_is_session_active($uid, $sid)) {
@@ -146,12 +143,10 @@ function auth_enforce_device_policy(): void {
 }
 
 /**
- * ✅ Не обов’язково, але дуже корисно: перерахунок доступу по users.json.
- * Викликай на account-сторінках після require users_store.php.
+ * Recalculate access from users_store (call AFTER requiring users_store.php)
  */
 function auth_refresh_access(): void {
   if (!function_exists('user_find_by_id') || !function_exists('user_has_access')) {
-    // якщо users_store ще не підключений
     return;
   }
 
