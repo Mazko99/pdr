@@ -15,6 +15,9 @@ require_once __DIR__ . '/db.php';
  */
 
 function progress_ensure_schema(PDO $pdo): void {
+  static $done = false;
+  if ($done) return;
+
   // PASSED TESTS
   $pdo->exec("
     CREATE TABLE IF NOT EXISTS user_passed_tests (
@@ -45,6 +48,8 @@ function progress_ensure_schema(PDO $pdo): void {
       PRIMARY KEY (user_id, test_bucket, question_id)
     );
   ");
+
+  $done = true;
 }
 
 /** (compat) no longer used, but kept so old code won't crash if called */
@@ -128,33 +133,60 @@ function progress_user_get(string $uid): array {
   ];
 }
 
+/** ✅ ALIAS for older code that calls progress_get_user() */
+function progress_get_user(string $uid): array {
+  return progress_user_get($uid);
+}
+
 /** (compat) previously wrote whole blob; now DB-based so no-op */
 function progress_user_set(string $uid, array $u): void {}
 
-/** Add mistakes qids into bucket(testId or 0) */
+/** ✅ ALIAS for older code that calls progress_user_update/set etc (safe no-op) */
+function progress_set_user(string $uid, array $u): void {
+  progress_user_set($uid, $u);
+}
+
+/**
+ * Add mistakes qids into bucket(testId or 0).
+ *
+ * ✅ IMPORTANT FIX:
+ * - If $testId > 0, we ALSO write the same mistakes into bucket 0 (global),
+ *   so any statistics page that reads only bucket "0" will still show mistakes.
+ */
 function progress_add_mistakes(string $uid, int $testId, array $qids): void {
   $pdo = db();
   progress_ensure_schema($pdo);
 
-  $bucket = (int)$testId;
-  $qids = array_values(array_unique(array_map('intval', $qids)));
+  $testId = (int)$testId;
 
-  // Postgres upsert/do nothing
-  foreach ($qids as $qid) {
-    if ($qid <= 0) continue;
-    try {
-      $stmt = $pdo->prepare("
-        INSERT INTO user_mistakes (user_id, test_bucket, question_id)
-        VALUES (?, ?, ?)
-        ON CONFLICT (user_id, test_bucket, question_id) DO NOTHING
-      ");
-      $stmt->execute([$uid, $bucket, $qid]);
-    } catch (Throwable $e) {
-      // fallback if DB is MySQL-like
-      $stmt = $pdo->prepare("INSERT IGNORE INTO user_mistakes (user_id, test_bucket, question_id) VALUES (?,?,?)");
-      $stmt->execute([$uid, $bucket, $qid]);
+  // нормалізація qids
+  $qids = array_values(array_unique(array_map('intval', $qids)));
+  $qids = array_values(array_filter($qids, fn($x) => (int)$x > 0));
+  if (empty($qids)) return;
+
+  // ✅ buckets: always write to requested bucket; additionally to bucket 0 if testId>0
+  $buckets = [$testId];
+  if ($testId > 0) $buckets[] = 0;
+  $buckets = array_values(array_unique($buckets));
+
+  // 1 prepared stmt for speed
+  $stmt = $pdo->prepare("
+    INSERT INTO user_mistakes (user_id, test_bucket, question_id)
+    VALUES (?, ?, ?)
+    ON CONFLICT (user_id, test_bucket, question_id) DO NOTHING
+  ");
+
+  foreach ($buckets as $bucket) {
+    $bucket = (int)$bucket;
+    foreach ($qids as $qid) {
+      $stmt->execute([$uid, $bucket, (int)$qid]);
     }
   }
+}
+
+/** ✅ optional alias if somewhere used different name */
+function progress_mistakes_add(string $uid, int $testId, array $qids): void {
+  progress_add_mistakes($uid, $testId, $qids);
 }
 
 /** Mark test as passed */
@@ -163,17 +195,17 @@ function progress_mark_passed(string $uid, int $testId): void {
   $pdo = db();
   progress_ensure_schema($pdo);
 
-  try {
-    $stmt = $pdo->prepare("
-      INSERT INTO user_passed_tests (user_id, test_id)
-      VALUES (?, ?)
-      ON CONFLICT (user_id, test_id) DO UPDATE SET passed_at = NOW()
-    ");
-    $stmt->execute([$uid, $testId]);
-  } catch (Throwable $e) {
-    $stmt = $pdo->prepare("INSERT IGNORE INTO user_passed_tests (user_id, test_id) VALUES (?,?)");
-    $stmt->execute([$uid, $testId]);
-  }
+  $stmt = $pdo->prepare("
+    INSERT INTO user_passed_tests (user_id, test_id)
+    VALUES (?, ?)
+    ON CONFLICT (user_id, test_id) DO UPDATE SET passed_at = NOW()
+  ");
+  $stmt->execute([$uid, (int)$testId]);
+}
+
+/** ✅ alias just in case old code calls progress_test_passed_add */
+function progress_test_passed_add(string $uid, int $testId): void {
+  progress_mark_passed($uid, $testId);
 }
 
 /** Return all unique mistake question ids for user (across buckets) */
@@ -203,15 +235,15 @@ function progress_mark_theory_done(string $uid, string $topicKey): void {
   $pdo = db();
   progress_ensure_schema($pdo);
 
-  try {
-    $stmt = $pdo->prepare("
-      INSERT INTO user_theory_done (user_id, topic_key)
-      VALUES (?, ?)
-      ON CONFLICT (user_id, topic_key) DO UPDATE SET done_at = NOW()
-    ");
-    $stmt->execute([$uid, $topicKey]);
-  } catch (Throwable $e) {
-    $stmt = $pdo->prepare("INSERT IGNORE INTO user_theory_done (user_id, topic_key) VALUES (?,?)");
-    $stmt->execute([$uid, $topicKey]);
-  }
+  $stmt = $pdo->prepare("
+    INSERT INTO user_theory_done (user_id, topic_key)
+    VALUES (?, ?)
+    ON CONFLICT (user_id, topic_key) DO UPDATE SET done_at = NOW()
+  ");
+  $stmt->execute([$uid, $topicKey]);
+}
+
+/** ✅ alias for older code */
+function progress_theory_done_mark(string $uid, string $topicKey): void {
+  progress_mark_theory_done($uid, $topicKey);
 }

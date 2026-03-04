@@ -798,25 +798,36 @@ if ($allowed !== null) {
     if ($timeLimit > 0 && $spent > $timeLimit) $passed = false;
 
     // ✅ Persist progress
-    $mode = (string)($quiz['mode'] ?? 'test');
-    $testId = (int)($quiz['test_id'] ?? 0);
+$mode = (string)($quiz['mode'] ?? 'test');
+$testId = (int)($quiz['test_id'] ?? 0);
 
-    $wrongQids = [];
-    foreach ($answers as $a) {
-        if (!is_array($a)) continue;
-        if (!empty($a['qid']) && isset($a['is_correct']) && $a['is_correct'] === false) {
-            $wrongQids[] = (int)$a['qid'];
-        }
-    }
-    $wrongQids = array_values(array_filter($wrongQids, fn($x)=> $x>0));
+// збираємо wrong qids з answers
+$wrongQids = [];
+foreach ($answers as $a) {
+  if (!is_array($a)) continue;
+  if (!empty($a['qid']) && array_key_exists('is_correct', $a) && $a['is_correct'] === false) {
+    $wrongQids[] = (int)$a['qid'];
+  }
+}
+$wrongQids = array_values(array_unique(array_filter($wrongQids, fn($x)=> (int)$x > 0)));
 
-    $bucketTestId = ($mode === 'test' && $testId > 0) ? $testId : 0;
-    if (count($wrongQids) > 0) {
-        progress_add_mistakes((string)$uid, $bucketTestId, $wrongQids);
-    }
-    if ($passed && $mode === 'test' && $testId > 0) {
-        progress_mark_passed((string)$uid, $testId);
-    }
+// ✅ ВАЖЛИВО: тренажер НЕ пишемо в статистику (якщо хочеш — скажеш, зробимо)
+$isTrainerMode = (strpos($mode, 'trainer') === 0);
+
+if (!$isTrainerMode && count($wrongQids) > 0) {
+  // 1) завжди пишемо в загальний bucket (ALL)
+  progress_add_mistakes((string)$uid, 0, $wrongQids);
+
+  // 2) якщо це реальний тест з id — пишемо ще й в його bucket
+  if ($testId > 0) {
+    progress_add_mistakes((string)$uid, $testId, $wrongQids);
+  }
+}
+
+// passed (тільки для звичайного теста з id)
+if ($passed && $mode === 'test' && $testId > 0) {
+  progress_mark_passed((string)$uid, $testId);
+}
 
     $csrf = csrf_token();
     ?>
