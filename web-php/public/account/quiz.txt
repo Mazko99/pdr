@@ -671,6 +671,19 @@ if ($mode === 'exam' || $mode === 'exam_mix') {
 
         $correct = (int)$q['correct'];
         $isCorrect = ($choice === $correct);
+        
+                // ✅ NEW: запис помилки одразу (Railway sessions можуть “злітати”, і finish не завжди спрацює)
+        $modeNow = (string)($quiz['mode'] ?? '');
+        $isTrainerMode = (strpos($modeNow, 'trainer') === 0);
+
+        if (!$isTrainerMode && $choice > 0 && !$isCorrect) {
+            $testIdNow = (int)($quiz['test_id'] ?? 0);
+
+            // пишемо або в конкретний тест, або в bucket 0 (для екзамену/міксів)
+            $bucket = $testIdNow > 0 ? $testIdNow : 0;
+
+            progress_add_mistakes((string)$uid, $bucket, [(int)$qid]);
+        }
 
         if (!isset($quiz['answers']) || !is_array($quiz['answers'])) $quiz['answers'] = [];
 
@@ -930,34 +943,6 @@ $timeLeft = $timeLimit > 0 ? max(0, $timeLimit - $spent) : 0;
 // time over -> finish (only if limited)
 if ($timeLimit > 0 && $spent > $timeLimit) {
     quiz_redirect('/account/quiz.php?action=finish');
-}
-
-$mistakes = quiz_count_mistakes($quiz);
-
-$modeNow = (string)($quiz['mode'] ?? '');
-$isTrainer = (strpos($modeNow, 'trainer') === 0);
-
-$allowed = $quiz['mistakes_allowed'] ?? null;
-$allowed = is_null($allowed) ? null : (int)$allowed;
-
-if (!$isTrainer) {
-    if ($allowed !== null) {
-        if ($mistakes > $allowed) {
-            quiz_redirect('/account/quiz.php?action=finish');
-        }
-        $maxMistakes = $allowed; // ✅ для UI покажемо “/2”
-    } else {
-        $modeNow = (string)($quiz['mode'] ?? '');
-        $isTrainer = (strpos($modeNow, 'trainer') === 0);
-
-        $maxMistakes = (int)($quiz['max_mistakes'] ?? ($isTrainer ? 999999 : 3));
-        if ($mistakes >= $maxMistakes) {
-            quiz_redirect('/account/quiz.php?action=finish');
-        }
-    }
-} else {
-    // ✅ trainer: без ліміту (але maxMistakes залишимо для сумісності)
-    $maxMistakes = (int)($quiz['max_mistakes'] ?? 999999);
 }
 
 $csrf = csrf_token();
