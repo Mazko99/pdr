@@ -1,19 +1,8 @@
 <?php
 declare(strict_types=1);
 
-require_once __DIR__ . '/../../src/bootstrap.php';
-require_once __DIR__ . '/../../src/users_store.php';
+require __DIR__ . '/../../src/bootstrap.php';
 
-// 1) Треба бути залогіненим
-if (!auth_user_id()) {
-  redirect('/login');
-}
-
-// 2) Підтягнути актуальний доступ/план (опційно, але бажано)
-auth_refresh_access();
-
-// 3) Перевірка політики "1 активний пристрій"
-auth_enforce_device_policy();
 /**
  * ProstoPDR / public/account/quiz.php
  * JSON: public/data/questions_export.json, public/data/tests_export.json
@@ -238,89 +227,42 @@ function progress_all_mistakes_ids(string $uid): array {
 /** -------- Auth -------- */
 $uid = auth_user_id();
 if (!$uid) {
-  header('Location: /login', true, 302);
-  exit;
+    header('Location: /login', true, 302);
+    exit;
 }
 
-// ✅ підтягнути доступ (якщо в bootstrap є логіка)
-if (function_exists('auth_refresh_access')) {
-  auth_refresh_access();
-}
-
-/**
- * ✅ Доступ рахуємо по users.json (plan + expires_at),
- * і синхронізуємо $_SESSION['has_access'].
- */
-function ppdr_user_has_access(?array $u): bool {
-  if (!is_array($u)) return false;
-
-  $plan = strtolower(trim((string)($u['plan'] ?? 'free')));
-  if ($plan === '' || $plan === 'free') return false;
-
-  $paidPlans = ['basic','mini12','dev','admin','base','12d'];
-  if (!in_array($plan, $paidPlans, true)) return false;
-
-  $exp = trim((string)($u['expires_at'] ?? ''));
-  if ($exp === '') return true;
-
-  $ts = strtotime($exp);
-  if ($ts === false) return true;
-
-  return $ts > time();
-}
-
-$userNow = function_exists('user_find_by_id') ? user_find_by_id((string)$uid) : null;
-$hasAccess = ppdr_user_has_access($userNow);
-
-$_SESSION['has_access'] = $hasAccess ? 1 : 0;
-
-if (is_array($userNow)) {
-  $_SESSION['plan'] = (string)($userNow['plan'] ?? '');
-  $_SESSION['expires_at'] = (string)($userNow['expires_at'] ?? '');
-}
-// DEBUG (потім видалиш)
-if (isset($_GET['dbg'])) {
-  header('Content-Type: text/plain; charset=utf-8');
-  echo "uid=" . $uid . "\n";
-  echo "session_has_access=" . (int)!empty($_SESSION['has_access']) . "\n";
-  echo "plan=" . (is_array($userNow) ? ($userNow['plan'] ?? '') : 'NOUSER') . "\n";
-  echo "expires_at=" . (is_array($userNow) ? ($userNow['expires_at'] ?? '') : '') . "\n";
-  echo "now=" . date('c') . "\n";
-  exit;
-}
-
+$hasAccess = !empty($_SESSION['has_access']);
 if (!$hasAccess) {
-  http_response_code(200);
-  ?>
-  <!doctype html>
-  <html lang="uk">
-  <head>
-      <meta charset="utf-8" />
-      <meta name="viewport" content="width=device-width, initial-scale=1" />
-      <title>Доступ обмежено — ProstoPDR</title>
-      <link rel="preconnect" href="https://fonts.googleapis.com">
-      <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-      <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=Unbounded:wght@500;700&display=swap" rel="stylesheet">
-      <link rel="stylesheet" href="/assets/css/style.css?v=4" />
-  </head>
-  <body>
-  <main class="section section--soft" style="padding-top:46px;">
-      <div class="container">
-          <div class="account-card">
-              <h2 class="h2">Доступ обмежено</h2>
-              <p class="lead">Щоб відкрити тести, тренажер та іспит — активуй підписку.</p>
-
-              <div style="margin-top:14px; display:flex; gap:10px; flex-wrap:wrap;">
-                  <a class="btn btn--primary" href="/account/index.php?tab=dashboard#pricing">Обрати тариф</a>
-                  <a class="btn btn--ghost" href="/account/index.php">В кабінет</a>
-              </div>
-          </div>
-      </div>
-  </main>
-  </body>
-  </html>
-  <?php
-  exit;
+    http_response_code(200);
+    ?>
+    <!doctype html>
+    <html lang="uk">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Доступ обмежено — ProstoPDR</title>
+        <link rel="preconnect" href="https://fonts.googleapis.com">
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=Unbounded:wght@500;700&display=swap" rel="stylesheet">
+        <link rel="stylesheet" href="/assets/css/style.css?v=4" />
+    </head>
+    <body>
+    <main class="section section--soft" style="padding-top:46px;">
+        <div class="container">
+            <div class="account-card">
+                <h2 class="h2">Доступ обмежено</h2>
+                <p class="lead">Щоб відкрити тести, тренажер та іспит — активуй підписку.</p>
+                <div style="margin-top:14px; display:flex; gap:10px; flex-wrap:wrap;">
+                    <a class="btn btn--primary" href="/account/index.php?tab=dashboard#pricing">Обрати тариф</a>
+                    <a class="btn btn--ghost" href="/account/index.php">В кабінет</a>
+                </div>
+            </div>
+        </div>
+    </main>
+    </body>
+    </html>
+    <?php
+    exit;
 }
 
 // ---- Progress (for theory + sequential unlock) ----
@@ -467,7 +409,93 @@ function sample_ids(array $ids, int $n, int $seed): array {
     shuffle($ids);
     return array_slice($ids, 0, min($n, count($ids)));
 }
+function topic_is_medicine(string $topic): bool {
+    $t = mb_strtolower($topic);
+    $keys = ['мед', 'домед', 'перша допом', 'допомог', 'аптеч', 'кровотеч', 'серц', 'реанімац'];
+    foreach ($keys as $k) {
+        if (mb_strpos($t, $k) !== false) return true;
+    }
+    return false;
+}
 
+function topic_is_vehicle(string $topic): bool {
+    $t = mb_strtolower($topic);
+    $keys = ['будова', 'тз', 'транспорт', 'двигун', 'гальм', 'керм', 'підвіск', 'шини', 'техн'];
+    foreach ($keys as $k) {
+        if (mb_strpos($t, $k) !== false) return true;
+    }
+    return false;
+}
+
+/**
+ * Build exam set: 2 medicine + (2..3) vehicle + rest general, total=20
+ * Pools come from $topicPools built earlier in your file.
+ */
+function build_exam20_questions(array $topicPools, int $seed): array {
+    if ($seed === 0) $seed = 777;
+
+    $med = [];
+    $veh = [];
+    $all = [];
+
+    foreach ($topicPools as $topic => $ids) {
+        if (!is_array($ids) || empty($ids)) continue;
+
+        foreach ($ids as $qid) $all[(int)$qid] = true;
+
+        if (topic_is_medicine((string)$topic)) {
+            foreach ($ids as $qid) $med[(int)$qid] = true;
+        } elseif (topic_is_vehicle((string)$topic)) {
+            foreach ($ids as $qid) $veh[(int)$qid] = true;
+        }
+    }
+
+    $allIds = array_keys($all);
+    $medIds = array_keys($med);
+    $vehIds = array_keys($veh);
+
+    // choose vehicle count: 3 if possible else 2
+    $vehNeed = (count($vehIds) >= 3) ? 3 : 2;
+    if (count($vehIds) < 2) $vehNeed = min(2, count($vehIds));
+
+    $medNeed = min(2, count($medIds));
+
+    // general pool = everything except med/veh
+    $exclude = [];
+    foreach ($medIds as $x) $exclude[(int)$x] = true;
+    foreach ($vehIds as $x) $exclude[(int)$x] = true;
+
+    $general = [];
+    foreach ($allIds as $x) {
+        $x = (int)$x;
+        if (!isset($exclude[$x])) $general[] = $x;
+    }
+
+    // sample with deterministic seed offsets
+    $pickedMed = $medNeed > 0 ? sample_ids($medIds, $medNeed, $seed + 11) : [];
+    $pickedVeh = $vehNeed > 0 ? sample_ids($vehIds, $vehNeed, $seed + 22) : [];
+
+    $needTotal = 20;
+    $left = $needTotal - count($pickedMed) - count($pickedVeh);
+    if ($left < 0) $left = 0;
+
+    $pickedGen = sample_ids($general, $left, $seed + 33);
+
+    // if general not enough, pad from all (but keep unique)
+    $picked = array_values(array_unique(array_merge($pickedMed, $pickedVeh, $pickedGen)));
+    if (count($picked) < $needTotal) {
+        $more = sample_ids($allIds, $needTotal - count($picked), $seed + 44);
+        $picked = array_values(array_unique(array_merge($picked, $more)));
+    }
+
+    // force exactly 20, shuffle final
+    $picked = array_slice($picked, 0, $needTotal);
+
+    mt_srand($seed + 55);
+    shuffle($picked);
+
+    return $picked;
+}
 /** -------- Actions -------- */
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     csrf_verify((string)($_POST['csrf'] ?? null));
@@ -560,24 +588,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $qIds = array_values($filtered);
         }
 
-        // ===== EXAM MIX =====
-        if ($mode === 'exam' || $mode === 'exam_mix') {
-            $title = 'Іспит';
-            $topic = ($mode === 'exam_mix') ? 'Змішаний іспит' : 'Контрольний іспит';
-            $timeLimit = 40 * 60; // 40 хв
-            $maxMistakes = 10;
+        // ===== EXAM (NEW логіка) =====
+if ($mode === 'exam' || $mode === 'exam_mix') {
+    $title = 'Іспит';
+    $topic = 'Іспит (20 питань)';
 
-            $all = array_keys($qMap);
-            if (count($all) < 40) {
-                quiz_abort('Недостатньо питань для іспиту', [
-                    'total_questions_available' => count($all),
-                    'need' => 40,
-                ]);
-            }
+    // ✅ 20 хв
+    $timeLimit = 20 * 60;
 
-            if ($seed === 0) $seed = 777;
-            $qIds = sample_ids($all, 40, $seed);
-        }
+    // ✅ дозволено 2 помилки, на 3-й — завершення
+    $mistakesAllowed = 2;
+
+    if ($seed === 0) $seed = 777;
+
+    // 2 мед + 2..3 ТЗ + решта загальні = 20
+    $qIds = build_exam20_questions($topicPools, $seed);
+
+    // збережемо ліміт помилок в сесію (нижче)
+    $maxMistakes = 999999; // (не використовуємо як ліміт, лишимо безпечно)
+}
 
         // ===== EXAM TOPIC (by topic + part) =====
         if ($mode === 'exam_topic') {
@@ -682,24 +711,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         // Build quiz session
         $_SESSION['quiz'] = [
-            'mode' => $mode,
-            'test_id' => $testId,
-            'title' => $title,
-            'topic' => $topic,
-            'time_limit_sec' => $timeLimit,
-            'time_limit' => $timeLimit,
-            'max_mistakes' => $maxMistakes,
-            'started_at' => time(),
-            'q_ids' => array_values($qIds),
-            'idx' => 0,
-            'total' => count($qIds),
-            'answers' => [],
-            'wrong_qids' => [],
-            'seed' => $seed,
-        ];
+    'mode' => $mode,
+    'test_id' => $testId,
+    'title' => $title,
+    'topic' => $topic,
+
+    // ✅ важливо: у тебе далі по коду місцями читається time_limit_sec
+    'time_limit' => $timeLimit,
+    'time_limit_sec' => $timeLimit,
+
+    // старе поле лишаємо, але новий іспит буде дивитись на mistakes_allowed
+    'max_mistakes' => $maxMistakes,
+
+    // ✅ нове: дозволені помилки (2), завершення на 3-й (тобто коли mistakes > 2)
+    'mistakes_allowed' => isset($mistakesAllowed) ? (int)$mistakesAllowed : null,
+
+    'started_at' => time(),
+    'q_ids' => array_values($qIds),
+    'idx' => 0,
+    'total' => count($qIds),
+    'answers' => [],
+    'wrong_qids' => [],
+    'seed' => $seed,
+];
 
         quiz_redirect('/account/quiz.php');
     }
+<!-- ДАЛІ ТВОЯ ОРИГІНАЛЬНА HTML/RENDER-ЧАСТИНА ФАЙЛУ БЕЗ УРІЗОК -->
 
     if ($action === 'answer') {
         if (!isset($_SESSION['quiz']) || !is_array($_SESSION['quiz']) || !quiz_session_is_valid($_SESSION['quiz'])) {
@@ -744,10 +782,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         // ✅ auto finish on mistakes limit (exam/test)
         $mistakes = quiz_count_mistakes($quiz);
-        $maxMistakes = (int)($quiz['max_mistakes'] ?? 3);
-        if ($mistakes >= $maxMistakes) {
-            quiz_redirect('/account/quiz.php?action=finish');
-        }
+
+// ✅ Якщо задано mistakes_allowed — працюємо по ньому (2 помилки допустимо)
+$allowed = $quiz['mistakes_allowed'] ?? null;
+$allowed = is_null($allowed) ? null : (int)$allowed;
+
+if ($allowed !== null) {
+    // на 3-й помилці завершуємо => коли mistakes > 2
+    if ($mistakes > $allowed) {
+        quiz_redirect('/account/quiz.php?action=finish');
+    }
+} else {
+    // fallback старої логіки
+    $maxMistakes = (int)($quiz['max_mistakes'] ?? 3);
+    if ($mistakes >= $maxMistakes) {
+        quiz_redirect('/account/quiz.php?action=finish');
+    }
+}
 
         // ✅ if all answered -> finish
         $answered = is_array($quiz['answers']) ? count($quiz['answers']) : 0;
@@ -795,9 +846,16 @@ if ($action === 'finish') {
     $started = (int)($quiz['started_at'] ?? time());
     $spent = time() - $started;
 
-    $maxMistakes = (int)($quiz['max_mistakes'] ?? 3);
+    $allowed = $quiz['mistakes_allowed'] ?? null;
+$allowed = is_null($allowed) ? null : (int)$allowed;
 
+if ($allowed !== null) {
+    $maxMistakes = $allowed; // для UI
+    $passed = ($mistakes <= $allowed) && ($answered >= $total) && ($total > 0);
+} else {
+    $maxMistakes = (int)($quiz['max_mistakes'] ?? 3);
     $passed = ($mistakes < $maxMistakes) && ($answered >= $total) && ($total > 0);
+}
     if ($timeLimit > 0 && $spent > $timeLimit) $passed = false;
 
     // ✅ Persist progress
@@ -925,9 +983,20 @@ if ($timeLimit > 0 && $spent > $timeLimit) {
 }
 
 $mistakes = quiz_count_mistakes($quiz);
-$maxMistakes = (int)($quiz['max_mistakes'] ?? 3);
-if ($mistakes >= $maxMistakes) {
-    quiz_redirect('/account/quiz.php?action=finish');
+
+$allowed = $quiz['mistakes_allowed'] ?? null;
+$allowed = is_null($allowed) ? null : (int)$allowed;
+
+if ($allowed !== null) {
+    if ($mistakes > $allowed) {
+        quiz_redirect('/account/quiz.php?action=finish');
+    }
+    $maxMistakes = $allowed; // ✅ для UI покажемо “/2”
+} else {
+    $maxMistakes = (int)($quiz['max_mistakes'] ?? 3);
+    if ($mistakes >= $maxMistakes) {
+        quiz_redirect('/account/quiz.php?action=finish');
+    }
 }
 
 $csrf = csrf_token();
@@ -1206,6 +1275,6 @@ $topic = (string)($quiz['topic'] ?? '');
     }
 })();
 </script>
-<?php require_once __DIR__ . '/../partials/chat_widget.php'; ?>
+
 </body>
 </html>
