@@ -26,74 +26,6 @@ if (!is_array($user)) {
 $notice = '';
 $error = '';
 
-function admin_users_json_path(): string {
-  return __DIR__ . '/../../storage/users.json';
-}
-
-function admin_users_load_raw(): array {
-  $p = admin_users_json_path();
-  if (!is_file($p)) return ['users' => []];
-  $raw = (string)file_get_contents($p);
-  if (strncmp($raw, "\xEF\xBB\xBF", 3) === 0) $raw = substr($raw, 3);
-  $data = json_decode($raw, true);
-  if (!is_array($data)) return ['users' => []];
-  if (!isset($data['users']) || !is_array($data['users'])) {
-    // якщо це просто список
-    $isList = array_keys($data) === range(0, count($data) - 1);
-    if ($isList) return ['users' => $data];
-    return ['users' => []];
-  }
-  return $data;
-}
-
-function admin_users_save_raw(array $data): void {
-  if (!isset($data['users']) || !is_array($data['users'])) $data['users'] = [];
-  $p = admin_users_json_path();
-  $dir = dirname($p);
-  if (!is_dir($dir)) @mkdir($dir, 0775, true);
-
-  $json = json_encode($data, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
-  if (!is_string($json)) return;
-
-  $tmp = $p . '.tmp';
-  file_put_contents($tmp, $json);
-  @rename($tmp, $p);
-}
-
-function admin_users_update_user(array $newUser): void {
-  $data = admin_users_load_raw();
-  $id = (string)($newUser['id'] ?? '');
-  if ($id === '') return;
-
-  $out = [];
-  $found = false;
-  foreach (($data['users'] ?? []) as $u) {
-    if (!is_array($u)) continue;
-    if ((string)($u['id'] ?? '') === $id) {
-      $out[] = $newUser;
-      $found = true;
-    } else {
-      $out[] = $u;
-    }
-  }
-  if (!$found) $out[] = $newUser;
-
-  $data['users'] = $out;
-  admin_users_save_raw($data);
-}
-
-function admin_users_delete_user(string $id): void {
-  $data = admin_users_load_raw();
-  $out = [];
-  foreach (($data['users'] ?? []) as $u) {
-    if (!is_array($u)) continue;
-    if ((string)($u['id'] ?? '') === $id) continue;
-    $out[] = $u;
-  }
-  $data['users'] = $out;
-  admin_users_save_raw($data);
-}
-
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   admin_csrf_verify($_POST['csrf'] ?? null);
 
@@ -107,13 +39,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $expiresAt = trim((string)($_POST['expires_at'] ?? ''));
 
     $user['plan'] = $plan;
-    $user['paid_at'] = gmdate('c');
+
+    // paid_at: ставимо коли це не free (і якщо хочеш — завжди при оновленні)
+    if ($plan !== 'free') {
+      $user['paid_at'] = gmdate('c');
+    }
 
     if ($plan === 'free') {
       $user['expires_at'] = null;
     } else {
       if ($expiresAt !== '') {
         // дозволяємо YYYY-MM-DD або ISO
+        // якщо YYYY-MM-DD — strtotime теж прокатить
         $ts = strtotime($expiresAt);
         if ($ts === false) {
           $error = 'Невірна дата expires_at.';
@@ -127,8 +64,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if ($error === '') {
-      admin_users_update_user($user);
-      $notice = 'Підписку оновлено.';
+      // ✅ ГОЛОВНЕ: зберігаємо в Postgres (Railway), а не в users.json
+      $user = user_upsert($user);
+      $notice = 'Підписку оновлено (Postgres).';
     }
   }
 
@@ -152,9 +90,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   }
 
   if ($action === 'delete_user') {
-    admin_users_delete_user($uid);
-    header('Location: /admin/users.php', true, 302);
-    exit;
+    // ⚠️ У Postgres видалення треба робити через user_delete().
+    // Якщо в users_store.php такої функції нема — не робимо "фейкове" видалення.
+    if (function_exists('user_delete')) {
+      user_delete($uid);
+      header('Location: /admin/users.php', true, 302);
+      exit;
+    } else {
+      $error = 'user_delete() не знайдено в users_store.php. Додай функцію або скажи — я дам готову.';
+    }
   }
 
   // refresh user
@@ -232,7 +176,7 @@ if (function_exists('sessions_list_for_user')) {
         <div class="h3" style="margin-top:0;">Керування підпискою</div>
 
         <form method="post" action="/admin/user.php?id=<?= urlencode($uid) ?>" style="display:grid;gap:10px;margin:0">
-          <input type="hidden" name="csrf" value="<?= h((string)($_SESSION['admin_csrf'] ?? '')) ?>">
+          <input type="hidden" name="csrf" value="<?= h(admin_csrf_token()) ?>">
           <input type="hidden" name="action" value="grant_plan">
 
           <label style="font-weight:900;">Plan</label>
@@ -261,7 +205,7 @@ if (function_exists('sessions_list_for_user')) {
         <div style="height:14px"></div>
 
         <form method="post" action="/admin/user.php?id=<?= urlencode($uid) ?>" style="margin:0;">
-          <input type="hidden" name="csrf" value="<?= h((string)($_SESSION['admin_csrf'] ?? '')) ?>">
+          <input type="hidden" name="csrf" value="<?= h(admin_csrf_token()) ?>">
           <input type="hidden" name="action" value="reset_sessions">
           <button class="btn btn--ghost" type="submit">Скинути активні сесії</button>
         </form>
@@ -270,7 +214,7 @@ if (function_exists('sessions_list_for_user')) {
 
         <form method="post" action="/admin/user.php?id=<?= urlencode($uid) ?>" style="margin:0;"
               onsubmit="return confirm('Точно видалити користувача?');">
-          <input type="hidden" name="csrf" value="<?= h((string)($_SESSION['admin_csrf'] ?? '')) ?>">
+          <input type="hidden" name="csrf" value="<?= h(admin_csrf_token()) ?>">
           <input type="hidden" name="action" value="delete_user">
           <button class="btn btn--ghost danger" type="submit">Видалити користувача</button>
         </form>
@@ -304,7 +248,7 @@ if (function_exists('sessions_list_for_user')) {
                 <td class="muted"><?= h((string)($s['last_seen'] ?? '')) ?></td>
                 <td>
                   <form method="post" action="/admin/user.php?id=<?= urlencode($uid) ?>" style="margin:0;">
-                    <input type="hidden" name="csrf" value="<?= h((string)($_SESSION['admin_csrf'] ?? '')) ?>">
+                    <input type="hidden" name="csrf" value="<?= h(admin_csrf_token()) ?>">
                     <input type="hidden" name="action" value="revoke_one_session">
                     <input type="hidden" name="sid" value="<?= h((string)($s['sid'] ?? '')) ?>">
                     <button class="btn btn--ghost" type="submit">Відкликати</button>
