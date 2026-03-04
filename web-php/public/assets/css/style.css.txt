@@ -1590,3 +1590,24 @@ body.quiz-page .tests-topbar {
     width:100% !important;
   }
 }
+/* ===== FIX: forms in plan CTA row ===== */
+.plan__cta-row form{
+  display:inline-block !important;
+  margin:0 !important;
+  padding:0 !important;
+  vertical-align:top;
+}
+
+.plan__cta-row{
+  display:flex !important;
+  gap:12px !important;
+  align-items:stretch !important;
+}
+
+.plan__cta-row form{
+  flex:0 0 auto !important; /* щоб поводилось як inline */
+}
+
+.plan__cta-row button{
+  min-height:44px;
+}
