@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require __DIR__ . '/../../src/bootstrap.php';
+require_once __DIR__ . '/../../src/progress_store.php';
 
 /**
  * ProstoPDR / public/account/quiz.php
@@ -129,99 +130,6 @@ function quiz_abort(string $title, array $debug = []): void {
     </html>
     <?php
     exit;
-}
-
-/** -------- Progress store (JSON, no SQL) -------- */
-function progress_path(): string {
-    return dirname(__DIR__, 2) . '/storage/progress.json'; // web-php/storage/progress.json
-}
-
-function progress_load(): array {
-    $p = progress_path();
-    if (!is_file($p)) return ['users' => []];
-    $raw = file_get_contents($p);
-    if ($raw === false) return ['users' => []];
-    if (strncmp($raw, "\xEF\xBB\xBF", 3) === 0) $raw = substr($raw, 3);
-    $data = json_decode($raw, true);
-    if (!is_array($data)) return ['users' => []];
-    if (!isset($data['users']) || !is_array($data['users'])) $data['users'] = [];
-    return $data;
-}
-
-function progress_save(array $data): void {
-    $p = progress_path();
-    $dir = dirname($p);
-    if (!is_dir($dir)) @mkdir($dir, 0777, true);
-
-    $json = json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
-    if (!is_string($json)) return;
-
-    $tmp = $p . '.tmp';
-    file_put_contents($tmp, $json);
-    @rename($tmp, $p);
-}
-
-function progress_user_get(string $uid): array {
-    $data = progress_load();
-    $u = $data['users'][$uid] ?? null;
-    if (!is_array($u)) {
-        $u = [
-            'passed_tests' => [],
-            'mistakes' => [],
-            'updated_at' => date('c'),
-        ];
-    }
-    if (!isset($u['passed_tests']) || !is_array($u['passed_tests'])) $u['passed_tests'] = [];
-    if (!isset($u['mistakes']) || !is_array($u['mistakes'])) $u['mistakes'] = [];
-    return $u;
-}
-
-function progress_user_set(string $uid, array $u): void {
-    $data = progress_load();
-    if (!isset($data['users']) || !is_array($data['users'])) $data['users'] = [];
-    $u['updated_at'] = date('c');
-    $data['users'][$uid] = $u;
-    progress_save($data);
-}
-
-function progress_add_mistakes(string $uid, int $testId, array $qids): void {
-    $u = progress_user_get($uid);
-    $k = (string)$testId;
-    $arr = $u['mistakes'][$k] ?? [];
-    if (!is_array($arr)) $arr = [];
-    $set = [];
-    foreach ($arr as $x) $set[(string)(int)$x] = true;
-    foreach ($qids as $x) $set[(string)(int)$x] = true;
-
-    $out = [];
-    foreach (array_keys($set) as $idStr) {
-        $id = (int)$idStr;
-        if ($id > 0) $out[] = $id;
-    }
-    sort($out);
-    $u['mistakes'][$k] = $out;
-    progress_user_set($uid, $u);
-}
-
-function progress_mark_passed(string $uid, int $testId): void {
-    $u = progress_user_get($uid);
-    $u['passed_tests'][(string)$testId] = true;
-    progress_user_set($uid, $u);
-}
-
-function progress_all_mistakes_ids(string $uid): array {
-    $u = progress_user_get($uid);
-    $out = [];
-    foreach ($u['mistakes'] as $list) {
-        if (!is_array($list)) continue;
-        foreach ($list as $qid) {
-            $qid = (int)$qid;
-            if ($qid > 0) $out[$qid] = true;
-        }
-    }
-    $ids = array_keys($out);
-    sort($ids);
-    return $ids;
 }
 
 /** -------- Auth -------- */

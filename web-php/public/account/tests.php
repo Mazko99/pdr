@@ -7,6 +7,7 @@ if (session_status() !== PHP_SESSION_ACTIVE) {
 
 require_once __DIR__ . '/../../src/bootstrap.php';
 require_once __DIR__ . '/../../src/users_store.php';
+require_once __DIR__ . '/../src/progress_store.php';
 
 // 1) Треба бути залогіненим
 if (!auth_user_id()) {
@@ -151,36 +152,12 @@ if (!is_array($questions)) $questions = [];
  * ✅ Прогрес користувача (галочки біля складених тестів)
  * Зберігається у public/storage/progress.json (як у quiz.php)
  */
-function progress_path(): string {
-  return dirname(__DIR__, 2) . '/storage/progress.json'; // web-php/public/storage/progress.json
-}
-
-function progress_load(): array {
-  $p = progress_path();
-  if (!is_file($p)) return ['users' => []];
-  $raw = file_get_contents($p);
-  if ($raw === false) return ['users' => []];
-  if (strncmp($raw, "\xEF\xBB\xBF", 3) === 0) $raw = substr($raw, 3);
-  $data = json_decode($raw, true);
-  if (!is_array($data)) return ['users' => []];
-  if (!isset($data['users']) || !is_array($data['users'])) $data['users'] = [];
-  return $data;
-}
-
-$progress = progress_load();
-$userProgress = $progress['users'][(string)$uid] ?? [];
-if (!is_array($userProgress)) $userProgress = [];
-$passedTests = $userProgress['passed_tests'] ?? [];
+$uProg = progress_get_user((string)$uid);
+$passedTests = $uProg['passed_tests'] ?? [];
 if (!is_array($passedTests)) $passedTests = [];
 
-$theoryDoneMap = $userProgress['theory_done'] ?? [];
+$theoryDoneMap = $uProg['theory_done'] ?? [];
 if (!is_array($theoryDoneMap)) $theoryDoneMap = [];
-
-// quick map
-$qMap = [];
-foreach ($questions as $q) {
-  if (is_array($q) && isset($q['id'])) $qMap[(int)$q['id']] = $q;
-}
 
 /**
  * ✅ Обрізаємо список тестів/тем:
@@ -280,8 +257,8 @@ function all_tests_passed(array $testIds, array $passedTests): bool {
   return true;
 }
 
-$title = 'Тести';
-if ($mode === 'exam') $title = 'Іспит';
+$title = 'Підготовчі запитання до іспиту';
+if ($mode === 'exam') $title = 'Іспит як в СЦ';
 if ($mode === 'trainer') $title = 'Тренажер';
 
 $csrf = csrf_token();
