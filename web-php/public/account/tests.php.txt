@@ -306,12 +306,11 @@ $csrf = csrf_token();
       <a class="account-tab <?php echo $mode==='trainer'?'is-active':''; ?>" href="/account/tests.php?mode=trainer">Тренажер</a>
     </div>
 
-    <?php if ($mode === 'exam'): ?>
+   <?php if ($mode === 'exam'): ?>
 
-      <!-- =========================
-           ІСПИТИ
-           ========================= -->
-      <?php if ($mode === 'exam'): ?>
+  <!-- =========================
+       ІСПИТ
+       ========================= -->
 
   <div class="topic-block">
     <div class="topic-block__head">
