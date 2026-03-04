@@ -3,6 +3,12 @@ FROM php:8.3-cli
 WORKDIR /app
 COPY . /app
 
+# ✅ PostgreSQL driver for PHP (pdo_pgsql + pgsql)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libpq-dev \
+  && docker-php-ext-install pdo_pgsql pgsql \
+  && rm -rf /var/lib/apt/lists/*
+
 # Логи помилок у консоль
 RUN printf '%s\n' \
 'display_errors=1' \
