@@ -482,6 +482,18 @@ $sessions = function_exists('sessions_list_for_user') ? sessions_list_for_user($
             <div class="pricing pricing--account">
 
               <!-- ✅ 699/міс -->
+<?php
+  $dbg_uid = auth_user_id();
+  $dbg_has_session = (session_status() === PHP_SESSION_ACTIVE);
+  $dbg_csrf = csrf_token(); // якщо функція є
+?>
+<div style="max-width:900px;margin:10px auto;padding:10px;border:1px dashed #bbb;border-radius:10px;font:14px/1.4 system-ui;background:#fff;">
+  <div><b>DEBUG PAY:</b></div>
+  <div>uid: <b><?= htmlspecialchars((string)$dbg_uid) ?></b></div>
+  <div>session_active: <b><?= $dbg_has_session ? 'yes' : 'no' ?></b></div>
+  <div>csrf_len: <b><?= htmlspecialchars((string)strlen((string)$dbg_csrf)) ?></b></div>
+  <div>csrf_preview: <code><?= htmlspecialchars(substr((string)$dbg_csrf, 0, 12)) ?>...</code></div>
+</div>
 <article class="plan plan--basic" id="planCard">
   <h3 class="plan__title">Базовий план<br/>підписка</h3>
   <p class="plan__desc">

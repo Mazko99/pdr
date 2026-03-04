@@ -9,6 +9,14 @@ require_once __DIR__ . '/../../src/mono_payments_store.php';
 if (session_status() !== PHP_SESSION_ACTIVE) {
   @session_start();
 }
+// === DEBUG MODE (temporary) ===
+$__debug = (isset($_GET['debug']) && $_GET['debug'] === '1');
+function debug_dump($title, $data): void {
+  header('Content-Type: text/plain; charset=utf-8');
+  echo "=== {$title} ===\n";
+  print_r($data);
+  exit;
+}
 
 // ✅ ENDPOINT ONLY: POST
 if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'POST') {
