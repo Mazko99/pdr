@@ -706,7 +706,10 @@ if (!$isTrainer) {
         }
     } else {
         // fallback старої логіки
-        $maxMistakes = (int)($quiz['max_mistakes'] ?? 3);
+        $modeNow = (string)($quiz['mode'] ?? '');
+        $isTrainer = (strpos($modeNow, 'trainer') === 0);
+
+        $maxMistakes = (int)($quiz['max_mistakes'] ?? ($isTrainer ? 999999 : 3));
         if ($mistakes >= $maxMistakes) {
             quiz_redirect('/account/quiz.php?action=finish');
         }
@@ -724,7 +727,10 @@ if ($allowed !== null) {
     }
 } else {
     // fallback старої логіки
-    $maxMistakes = (int)($quiz['max_mistakes'] ?? 3);
+    $modeNow = (string)($quiz['mode'] ?? '');
+    $isTrainer = (strpos($modeNow, 'trainer') === 0);
+
+    $maxMistakes = (int)($quiz['max_mistakes'] ?? ($isTrainer ? 999999 : 3));
     if ($mistakes >= $maxMistakes) {
         quiz_redirect('/account/quiz.php?action=finish');
     }
@@ -783,7 +789,10 @@ if ($allowed !== null) {
     $maxMistakes = $allowed; // для UI
     $passed = ($mistakes <= $allowed) && ($answered >= $total) && ($total > 0);
 } else {
-    $maxMistakes = (int)($quiz['max_mistakes'] ?? 3);
+    $modeNow = (string)($quiz['mode'] ?? '');
+    $isTrainer = (strpos($modeNow, 'trainer') === 0);
+
+    $maxMistakes = (int)($quiz['max_mistakes'] ?? ($isTrainer ? 999999 : 3));
     $passed = ($mistakes < $maxMistakes) && ($answered >= $total) && ($total > 0);
 }
     if ($timeLimit > 0 && $spent > $timeLimit) $passed = false;
@@ -927,7 +936,10 @@ if (!$isTrainer) {
         }
         $maxMistakes = $allowed; // ✅ для UI покажемо “/2”
     } else {
-        $maxMistakes = (int)($quiz['max_mistakes'] ?? 3);
+        $modeNow = (string)($quiz['mode'] ?? '');
+        $isTrainer = (strpos($modeNow, 'trainer') === 0);
+
+        $maxMistakes = (int)($quiz['max_mistakes'] ?? ($isTrainer ? 999999 : 3));
         if ($mistakes >= $maxMistakes) {
             quiz_redirect('/account/quiz.php?action=finish');
         }
