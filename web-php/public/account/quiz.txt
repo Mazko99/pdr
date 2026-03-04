@@ -737,7 +737,7 @@ if ($mode === 'exam' || $mode === 'exam_mix') {
 
         quiz_redirect('/account/quiz.php');
     }
-<!-- ДАЛІ ТВОЯ ОРИГІНАЛЬНА HTML/RENDER-ЧАСТИНА ФАЙЛУ БЕЗ УРІЗОК -->
+// ДАЛІ ТВОЯ ОРИГІНАЛЬНА HTML/RENDER-ЧАСТИНА ФАЙЛУ БЕЗ УРІЗОК
 
     if ($action === 'answer') {
         if (!isset($_SESSION['quiz']) || !is_array($_SESSION['quiz']) || !quiz_session_is_valid($_SESSION['quiz'])) {

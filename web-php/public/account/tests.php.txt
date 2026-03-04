@@ -117,9 +117,9 @@ $mode = in_array($mode, ['tests','exam','trainer'], true) ? $mode : 'tests';
 $mistakes = !empty($_GET['mistakes']); // trainer special: repeat mistakes
 
 // НАЛАШТУВАННЯ (як ти просив)
-const EXAM_QUESTIONS = 40;
-const EXAM_TIME_SEC  = 40 * 60; // 40 хв
-const EXAM_MISTAKES  = 10;
+const EXAM_QUESTIONS = 20;
+const EXAM_TIME_SEC  = 20 * 60; // 40 хв
+const EXAM_MISTAKES  = 3;
 
 const TRAINER_QUESTIONS = 40; // 40 питань, без часу
 
