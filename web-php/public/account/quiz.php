@@ -436,7 +436,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $qIds = [];
          
         <?php
-<?php
 // ===== DEBUG THEORY GATE (TEMP) =====
 $__uid_dbg = (string)($uid ?? ($_SESSION['uid'] ?? $_SESSION['user_id'] ?? ''));
 $__topic_dbg = trim((string)($topic ?? ($needTheoryTopic ?? ($_SESSION['quiz']['topic'] ?? ($_SESSION['quiz']['meta']['topic'] ?? '')))));
