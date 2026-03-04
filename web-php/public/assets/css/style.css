@@ -1692,9 +1692,3 @@ body.quiz-page .tests-topbar {
     -webkit-text-fill-color: #111 !important;
     opacity: 1 !important;
   }
-
-  /* 3) Якщо варіанти — це "outline" і текст зникає */
-  button, label {
-    background: #fff !important;
-  }
-}
