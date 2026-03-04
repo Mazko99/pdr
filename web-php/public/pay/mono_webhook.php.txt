@@ -10,7 +10,7 @@ if (session_status() !== PHP_SESSION_ACTIVE) {
 }
 
 // === правильний storage: web-php/storage ===
-$logDir = dirname(__DIR__, 3) . '/storage';
+$logDir = '/data';
 if (!is_dir($logDir)) {
   @mkdir($logDir, 0775, true);
 }

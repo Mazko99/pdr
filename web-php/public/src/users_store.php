@@ -32,7 +32,13 @@ declare(strict_types=1);
  */
 
 function users_store_path(): string {
-  return dirname(__DIR__) . '/storage/users.json';
+  $path = '/data/users.json';
+}
+if (!file_exists('/data/users.json')) {
+    file_put_contents('/data/users.json', json_encode([
+        "users" => [],
+        "oauth" => []
+    ], JSON_PRETTY_PRINT));
 }
 
 /**
