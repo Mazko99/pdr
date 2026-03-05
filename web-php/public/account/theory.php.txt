@@ -57,25 +57,11 @@ if (!function_exists('csrf_verify')) {
         }
     }
 }
-
-/** -------------------- Detect logged in user id (robust) -------------------- */
-function detect_uid_from_session(): string {
-    // Most common variants
-    $candidates = [
-        $_SESSION['user']['id'] ?? null,
-        $_SESSION['user']['user_id'] ?? null,
-        $_SESSION['user_id'] ?? null,
-        $_SESSION['uid'] ?? null,
-        $_SESSION['auth']['id'] ?? null,
-        $_SESSION['auth']['user_id'] ?? null,
-        $_SESSION['account']['id'] ?? null,
-        $_SESSION['account_id'] ?? null,
-    ];
-
-    foreach ($candidates as $v) {
-        if (is_int($v)) return (string)$v;
-        if (is_string($v) && trim($v) !== '') return trim($v);
-    }
+// ✅ ЄДИНИЙ правильний UID для прогресу — той, що повертає auth_user_id()
+$uid = (string)auth_user_id();
+if (trim($uid) === '') {
+  redirect('/login');
+}
 
     // As last resort: if you store email only, use email as key
     $emailCandidates = [
