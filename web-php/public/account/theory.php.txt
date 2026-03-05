@@ -178,27 +178,28 @@ $topic = trim((string)($_GET['topic'] ?? ''));
 
 // ✅ натиснули "Перейти до тестування" => підтверджуємо теорію
 if ($uid !== '' && $topic !== '' && (string)($_GET['done'] ?? '') === '1') {
-  // ✅ важливо: теорія має бути boolean true (compat), а не масив
+
+  $topicKey = $topic;
+  $slugKey  = slugify_ua($topicKey);
+
+  // ✅ важливо: theory_done зберігаємо як boolean true (compat)
   if (function_exists('progress_user_get') && function_exists('progress_user_set')) {
       $u = progress_user_get($uid);
       if (!is_array($u)) $u = [];
       if (!isset($u['theory_done']) || !is_array($u['theory_done'])) $u['theory_done'] = [];
-      $u['theory_done'][$topic] = true;
 
-// ✅ дублюємо slug-ключ, щоб точно збіглося з перевіркою quiz.php
-if (function_exists('slugify_ua')) {
-  $slug = slugify_ua($topic);
-  if (is_string($slug) && $slug !== '') {
-    $u['theory_done'][$slug] = true;
-  }
-}
+      $u['theory_done'][$topicKey] = true;
+      if ($slugKey !== '') $u['theory_done'][$slugKey] = true;
 
-progress_user_set($uid, $u);
+      progress_user_set($uid, $u);
   } else {
       // fallback JSON
       $u = user_progress_get($uid);
       if (!isset($u['theory_done']) || !is_array($u['theory_done'])) $u['theory_done'] = [];
-      $u['theory_done'][$topic] = true;
+
+      $u['theory_done'][$topicKey] = true;
+      if ($slugKey !== '') $u['theory_done'][$slugKey] = true;
+
       user_progress_set($uid, $u);
   }
 
@@ -222,29 +223,51 @@ function theory_is_done(string $uid, string $topic): bool {
     $td = $u['theory_done'] ?? [];
     if (!is_array($td)) return false;
 
-    $x = $td[$topic] ?? null;
+    $topicKey = trim($topic);
+    $slugKey  = $topicKey !== '' ? slugify_ua($topicKey) : '';
 
-    // ✅ FIX: compat у Postgres зберігає boolean true
+    // 1) спроба по topic (оригінал)
+    $x = $td[$topicKey] ?? null;
     if (is_bool($x)) return $x;
-
-    // fallback для старих JSON-структур
     if (is_array($x)) return !empty($x['done']);
+
+    // 2) спроба по slug
+    if ($slugKey !== '') {
+        $y = $td[$slugKey] ?? null;
+        if (is_bool($y)) return $y;
+        if (is_array($y)) return !empty($y['done']);
+    }
 
     return false;
 }
 
 function theory_mark_done(string $uid, string $topic): void {
+    $topicKey = trim($topic);
+    $slugKey  = $topicKey !== '' ? slugify_ua($topicKey) : '';
+
     // ✅ пишемо прогрес так само, як tests.php/quiz.php
     if (function_exists('progress_user_get') && function_exists('progress_user_set')) {
         $u = progress_user_get($uid);
         if (!is_array($u)) $u = [];
         if (!isset($u['theory_done']) || !is_array($u['theory_done'])) $u['theory_done'] = [];
 
-        // ✅ FIX: boolean true (а не масив)
-        $u['theory_done'][$topic] = true;
+        // ✅ boolean true (а не масив)
+        if ($topicKey !== '') $u['theory_done'][$topicKey] = true;
+        if ($slugKey !== '')  $u['theory_done'][$slugKey]  = true;
+
         progress_user_set($uid, $u);
         return;
     }
+
+    // fallback старий JSON
+    $u = user_progress_get($uid);
+    if (!isset($u['theory_done']) || !is_array($u['theory_done'])) $u['theory_done'] = [];
+
+    if ($topicKey !== '') $u['theory_done'][$topicKey] = true;
+    if ($slugKey !== '')  $u['theory_done'][$slugKey]  = true;
+
+    user_progress_set($uid, $u);
+}
 
     // fallback старий JSON
     $u = user_progress_get($uid);

@@ -447,7 +447,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $topic = (string)($t['topic'] ?? '');
 
             // ✅ Gate: theory must be read + sequential tests
-            $theoryOk = !empty($theoryDoneMap[$topic]['done']);
+            // ✅ Gate: theory must be read + sequential tests
+// Дозволяємо як ключ-оригінал "ЗАГАЛЬНІ ПОЛОЖЕННЯ", так і slug "zahalni-polozhennia"
+if (!function_exists('ppdr_slugify_ua')) {
+  function ppdr_slugify_ua(string $s): string {
+    $s = trim($s);
+    if ($s === '') return '';
+    $map = [
+      'А'=>'A','Б'=>'B','В'=>'V','Г'=>'H','Ґ'=>'G','Д'=>'D','Е'=>'E','Є'=>'Ye','Ж'=>'Zh','З'=>'Z','И'=>'Y','І'=>'I','Ї'=>'Yi','Й'=>'Y','К'=>'K','Л'=>'L','М'=>'M','Н'=>'N','О'=>'O','П'=>'P','Р'=>'R','С'=>'S','Т'=>'T','У'=>'U','Ф'=>'F','Х'=>'Kh','Ц'=>'Ts','Ч'=>'Ch','Ш'=>'Sh','Щ'=>'Shch','Ю'=>'Yu','Я'=>'Ya',
+      'а'=>'a','б'=>'b','в'=>'v','г'=>'h','ґ'=>'g','д'=>'d','е'=>'e','є'=>'ye','ж'=>'zh','з'=>'z','и'=>'y','і'=>'i','ї'=>'yi','й'=>'y','к'=>'k','л'=>'l','м'=>'m','н'=>'n','о'=>'o','п'=>'p','р'=>'r','с'=>'s','т'=>'t','у'=>'u','ф'=>'f','х'=>'kh','ц'=>'ts','ч'=>'ch','ш'=>'sh','щ'=>'shch','ю'=>'yu','я'=>'ya',
+      'Ь'=>'','ь'=>'','Ъ'=>'','ъ'=>'','’'=>'', '\''=>'',
+      '«'=>'','»'=>'',
+    ];
+    $s = strtr($s, $map);
+    $s = preg_replace('~[^a-zA-Z0-9]+~', '-', $s);
+    $s = trim((string)$s, '-');
+    return strtolower($s);
+  }
+}
+
+$topicSlug = $topic !== '' ? ppdr_slugify_ua($topic) : '';
+
+$theoryOk =
+  (!empty($theoryDoneMap[$topic]['done'])) ||
+  ($topicSlug !== '' && !empty($theoryDoneMap[$topicSlug]['done']));
+
+if (!$theoryOk) {
+  quiz_abort('Спочатку ознайомся з теорією по темі', [
+    'topic' => $topic,
+    'theory_url' => '/account/theory.php?topic=' . rawurlencode($topic),
+  ]);
+}
             if (!$theoryOk) {
                 quiz_abort('Спочатку ознайомся з теорією по темі', [
                     'topic' => $topic,
