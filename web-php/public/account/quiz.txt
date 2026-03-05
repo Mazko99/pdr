@@ -1169,6 +1169,27 @@ $topic = (string)($quiz['topic'] ?? '');
                     <div class="pp-pill"><small>Питання</small> <span><?= (int)($idx+1) ?></span>/<span><?= (int)$total ?></span></div>
                     <?php $isTrainerMode = strpos((string)$quiz['mode'], 'trainer') === 0; ?>
 
+// ----------------- SAFETY DEFAULTS (fix undefined) -----------------
+if (!isset($mistakes) || !is_int($mistakes)) {
+  // пробуємо взяти з сесії, якщо вже рахується
+  $mistakes = (int)($_SESSION['quiz']['mistakes'] ?? 0);
+}
+
+if (!isset($maxMistakes) || !is_int($maxMistakes)) {
+  // режим може бути test / exam / trainer
+  $modeSafe = (string)($mode ?? ($_GET['mode'] ?? ($_SESSION['quiz']['mode'] ?? 'test')));
+
+  // 0 = без ліміту (для trainer часто так)
+  $maxMistakes = (int)($_SESSION['quiz']['max_mistakes'] ?? 0);
+
+  // якщо в сесії ще нема — виставляємо дефолти по режимах
+  if ($maxMistakes <= 0) {
+    if ($modeSafe === 'exam') $maxMistakes = 2;      // як ти просив для іспиту
+    elseif ($modeSafe === 'test') $maxMistakes = 10; // стандарт на тест
+    else $maxMistakes = 0;                           // trainer: без ліміту
+  }
+}
+// -------------------------------------------------------------------
 <div class="pp-pill">
   <small>Помилки</small>
 
