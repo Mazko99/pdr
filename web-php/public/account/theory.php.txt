@@ -170,11 +170,7 @@ if ($uid !== '' && $topic !== '' && (string)($_GET['done'] ?? '') === '1') {
       if ($slugKey !== '') $u['theory_done'][$slugKey] = true;
 
       user_progress_set($uid, $u);
-  }
-
-  if ($uid !== '' && $topic !== '' && (string)($_GET['done'] ?? '') === '1') 
-
-function theory_is_done(string $uid, string $topic): bool {
+  if ($uid !== '' && $topic !== '' && (string)($_GET['done'] ?? '') === '1')
     // ✅ читаємо прогрес так само, як tests.php/quiz.php
     if (function_exists('progress_user_get')) {
         $u = progress_user_get($uid);
