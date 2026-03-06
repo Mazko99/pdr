@@ -669,22 +669,17 @@ if ($mode === 'exam' || $mode === 'exam_mix') {
     'test_id' => $testId,
     'title' => $title,
     'topic' => $topic,
-
     'time_limit' => $timeLimit,
     'time_limit_sec' => $timeLimit,
-
     'max_mistakes' => is_null($maxMistakes) ? null : (int)$maxMistakes,
     'mistakes_allowed' => isset($mistakesAllowed) ? (int)$mistakesAllowed : null,
-
     'started_at' => time(),
     'q_ids' => array_values($qIds),
     'idx' => 0,
     'total' => count($qIds),
-
     'answers' => [],
     'wrong_qids' => [],
     'mistakes' => 0,
-
     'seed' => $seed,
 ];
 

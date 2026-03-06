@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../../src/bootstrap.php';
 require_once __DIR__ . '/../../src/users_store.php';
+require_once __DIR__ . '/../../src/progress_store.php';
 
 // 1) Треба бути залогіненим
 if (!auth_user_id()) {
@@ -35,12 +36,11 @@ function json_read_array(string $path): array {
   return is_array($data) ? $data : [];
 }
 
-$uid = $_SESSION['user_id'] ?? null;
-if (!$uid) {
+$uidStr = (string)auth_user_id();
+if ($uidStr === '') {
   header('Location: /login', true, 302);
   exit;
 }
-$uidStr = (string)$uid;
 
 // ---- user ----
 $user = function_exists('user_find_by_id') ? user_find_by_id($uidStr) : null;
@@ -119,33 +119,24 @@ $subscription = [
 
 // (опційно) якщо тобі треба окремо в шаблоні
 // $subscriptionActive = $isActive;
-// ---- progress.json (помилки + пройдені тести) ----
-function progress_path(): string {
-  return dirname(__DIR__, 2) . '/storage/progress.json';
-}
-function progress_user_bucket(string $uid): array {
-  $p = progress_path();
-  $data = json_read_array($p);
-  $users = $data['users'] ?? null;
-  if (!is_array($users)) return [];
-  $u = $users[$uid] ?? null;
-  return is_array($u) ? $u : [];
-}
+// ---- progress_store (помилки + пройдені тести) ----
+$uProgress = progress_user_get($uidStr);
+if (!is_array($uProgress)) $uProgress = [];
 
-$uProgress = progress_user_bucket($uidStr);
 $passedTestsMap = $uProgress['passed_tests'] ?? [];
 if (!is_array($passedTestsMap)) $passedTestsMap = [];
+
 $passedTestIds = [];
 foreach ($passedTestsMap as $k => $v) {
   if ($v) $passedTestIds[] = (int)$k;
 }
-$passedTestIds = array_values(array_filter($passedTestIds, fn($x)=>$x>0));
+$passedTestIds = array_values(array_filter($passedTestIds, fn($x) => $x > 0));
 
 $mistakesByTest = $uProgress['mistakes'] ?? [];
 if (!is_array($mistakesByTest)) $mistakesByTest = [];
 
 $mistakeSet = [];
-foreach ($mistakesByTest as $list) {
+foreach ($mistakesByTest as $bucket => $list) {
   if (!is_array($list)) continue;
   foreach ($list as $qid) {
     $qid = (int)$qid;
