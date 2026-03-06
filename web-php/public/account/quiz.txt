@@ -10,11 +10,13 @@ require_once __DIR__ . '/../../src/progress_store.php';
  *
  * FIXES / ADD
  * ✅ exam_topic / exam_mix / trainer_topic / trainer_mix
- * ✅ Exam: 40 questions, 40 minutes, 3 mistakes
+ * ✅ Exam: 20 questions, 20 minutes, UI 3/3, виліт на 3-й помилці
  * ✅ Trainer: 40 questions, unlimited time, unlimited mistakes
  * ✅ After answering: DO NOT auto-next (show explain + "Далі")
  * ✅ Cut everything AFTER cutoff topic:
  *    "ДОДАТКОВІ ПИТАННЯ ЩОДО КАТЕГОРІЙ В1, В (БУДОВА І ТЕРМІНИ)"
+ * ✅ Repeat mistakes mode
+ * ✅ Correct answer in repeat-mistakes mode removes question from mistakes list
  */
 
 function h(string $s): string { return htmlspecialchars($s, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); }
@@ -24,7 +26,6 @@ function json_load_array(string $absPath): array {
     $raw = file_get_contents($absPath);
     if ($raw === false) throw new RuntimeException("Failed to read JSON file: {$absPath}");
 
-    // Strip UTF-8 BOM if present
     if (strncmp($raw, "\xEF\xBB\xBF", 3) === 0) $raw = substr($raw, 3);
 
     $data = json_decode($raw, true);
@@ -132,6 +133,33 @@ function quiz_abort(string $title, array $debug = []): void {
     exit;
 }
 
+function quiz_remove_mistakes(string $uid, array $qids): void {
+    $uid = trim($uid);
+    if ($uid === '') return;
+
+    $qids = array_values(array_unique(array_map('intval', $qids)));
+    $qids = array_values(array_filter($qids, fn($v) => $v > 0));
+    if (!$qids) return;
+
+    try {
+        $pdo = db();
+        $ph = implode(',', array_fill(0, count($qids), '?'));
+
+        $sql1 = "DELETE FROM user_mistakes WHERE user_id = ? AND question_id IN ($ph)";
+        $sql2 = "DELETE FROM user_test_mistakes WHERE user_id = ? AND question_id IN ($ph)";
+
+        $params = array_merge([$uid], $qids);
+
+        $st = $pdo->prepare($sql1);
+        $st->execute($params);
+
+        $st = $pdo->prepare($sql2);
+        $st->execute($params);
+    } catch (Throwable $e) {
+        // no-op
+    }
+}
+
 /** -------- Auth -------- */
 $uid = auth_user_id();
 if (!$uid) {
@@ -206,7 +234,7 @@ try {
 }
 
 try {
-    $testsListFull = json_load_array($tFile); // keep order
+    $testsListFull = json_load_array($tFile);
 } catch (Throwable $e) {
     quiz_abort('Помилка читання tests_export.json', [
         'error' => $e->getMessage(),
@@ -217,9 +245,6 @@ try {
 /** ===== CUT OFF AFTER TOPIC ===== */
 const CUTOFF_TOPIC = 'ДОДАТКОВІ ПИТАННЯ ЩОДО КАТЕГОРІЙ В1, В (БУДОВА І ТЕРМІНИ)';
 
-/**
- * Keep tests only up to cutoff topic (inclusive) in original order.
- */
 $testsList = [];
 $cutFound = false;
 foreach ($testsListFull as $t) {
@@ -231,13 +256,12 @@ foreach ($testsListFull as $t) {
         break;
     }
 }
-// if cutoff not found: keep all (safe fallback)
 if (!$cutFound) {
     $testsList = $testsListFull;
 }
 
 /** Build ordered test id lists per topic (for sequential unlock) */
-$topicTestOrder = []; // topic => [testId1,testId2,...] in file order
+$topicTestOrder = [];
 foreach ($testsList as $t) {
     if (!is_array($t)) continue;
     if ((string)($t['type'] ?? 'test') !== 'test') continue;
@@ -247,8 +271,8 @@ foreach ($testsList as $t) {
 }
 
 /** Build topic pools from allowed tests (type=test only) */
-$topicPools = [];   // topic => [qids...]
-$allowedQidsSet = []; // qid => true
+$topicPools = [];
+$allowedQidsSet = [];
 
 foreach ($testsList as $t) {
     if (!is_array($t)) continue;
@@ -266,13 +290,12 @@ foreach ($testsList as $t) {
     }
 }
 
-/** Filter qMap by allowed question ids (so mix/exam do not include beyond cutoff) */
+/** Filter qMap by allowed question ids */
 $qMap = [];
 foreach ($allowedQidsSet as $qid => $_) {
     if (isset($qMapFull[$qid])) $qMap[$qid] = $qMapFull[$qid];
 }
 
-// normalize topicPools to sorted arrays
 $topicPoolsOut = [];
 foreach ($topicPools as $topic => $set) {
     $ids = array_map('intval', array_keys($set));
@@ -281,7 +304,6 @@ foreach ($topicPools as $topic => $set) {
 }
 $topicPools = $topicPoolsOut;
 
-// tests map only from allowed tests
 $tMap = tests_map($testsList);
 
 /** -------- Helpers -------- */
@@ -309,14 +331,15 @@ function format_mmss(int $sec): string {
     return sprintf('%d:%02d', $m, $s);
 }
 
-/** Utility: sample N ids deterministically by seed */
 function sample_ids(array $ids, int $n, int $seed): array {
     $ids = array_values($ids);
     if ($seed === 0) $seed = 777;
     mt_srand($seed);
     shuffle($ids);
+    mt_srand();
     return array_slice($ids, 0, min($n, count($ids)));
 }
+
 function topic_is_medicine(string $topic): bool {
     $t = mb_strtolower($topic);
     $keys = ['мед', 'домед', 'перша допом', 'допомог', 'аптеч', 'кровотеч', 'серц', 'реанімац'];
@@ -336,8 +359,7 @@ function topic_is_vehicle(string $topic): bool {
 }
 
 /**
- * Build exam set: 2 medicine + (2..3) vehicle + rest general, total=20
- * Pools come from $topicPools built earlier in your file.
+ * Build exam set: 2 medicine + 2 vehicle + rest general, total=20
  */
 function build_exam20_questions(array $topicPools, int $seed): array {
     if ($seed === 0) $seed = 777;
@@ -362,12 +384,9 @@ function build_exam20_questions(array $topicPools, int $seed): array {
     $medIds = array_keys($med);
     $vehIds = array_keys($veh);
 
-    // choose vehicle count: 3 if possible else 2
-    $vehNeed = min(2, count($vehIds)); // рівно 2 (якщо є)
-
+    $vehNeed = min(2, count($vehIds));
     $medNeed = min(2, count($medIds));
 
-    // general pool = everything except med/veh
     $exclude = [];
     foreach ($medIds as $x) $exclude[(int)$x] = true;
     foreach ($vehIds as $x) $exclude[(int)$x] = true;
@@ -378,7 +397,6 @@ function build_exam20_questions(array $topicPools, int $seed): array {
         if (!isset($exclude[$x])) $general[] = $x;
     }
 
-    // sample with deterministic seed offsets
     $pickedMed = $medNeed > 0 ? sample_ids($medIds, $medNeed, $seed + 11) : [];
     $pickedVeh = $vehNeed > 0 ? sample_ids($vehIds, $vehNeed, $seed + 22) : [];
 
@@ -388,21 +406,21 @@ function build_exam20_questions(array $topicPools, int $seed): array {
 
     $pickedGen = sample_ids($general, $left, $seed + 33);
 
-    // if general not enough, pad from all (but keep unique)
     $picked = array_values(array_unique(array_merge($pickedMed, $pickedVeh, $pickedGen)));
     if (count($picked) < $needTotal) {
         $more = sample_ids($allIds, $needTotal - count($picked), $seed + 44);
         $picked = array_values(array_unique(array_merge($picked, $more)));
     }
 
-    // force exactly 20, shuffle final
     $picked = array_slice($picked, 0, $needTotal);
 
     mt_srand($seed + 55);
     shuffle($picked);
+    mt_srand();
 
     return $picked;
 }
+
 /** -------- Actions -------- */
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     csrf_verify((string)($_POST['csrf'] ?? null));
@@ -415,14 +433,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if ($action === 'start') {
-        // ✅ add new modes
         $mode = (string)($_POST['mode'] ?? 'test');
-        $allowedModes = ['test','exam','trainer','exam_topic','exam_mix','trainer_topic','trainer_mix'];
+        $allowedModes = ['test','exam','trainer','exam_topic','exam_mix','trainer_topic','trainer_mix','mistakes'];
         $mode = in_array($mode, $allowedModes, true) ? $mode : 'test';
 
         $testId = (int)($_POST['test_id'] ?? 0);
         $seed = (int)($_POST['seed'] ?? 0);
-        $mistakesOnly = !empty($_POST['mistakes_only']);
+        $mistakesOnly = !empty($_POST['mistakes_only']) || $mode === 'mistakes';
 
         $topicReq = (string)($_POST['topic'] ?? '');
         $partReq  = (int)($_POST['part'] ?? 1);
@@ -432,11 +449,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $topic = '';
         $timeLimit = 1200;
         $maxMistakes = 10;
+        $mistakesAllowed = null;
+        $failOnMistake = null;
 
         $qIds = [];
-         
 
-        // ===== TEST (as was) =====
+        // ===== TEST =====
         if ($mode === 'test') {
             $t = $tMap[$testId] ?? null;
             if (!is_array($t)) {
@@ -446,59 +464,51 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $title = (string)($t['title'] ?? 'Тест');
             $topic = (string)($t['topic'] ?? '');
 
-            // ✅ Gate: theory must be read + sequential tests
-            // ✅ Gate: theory must be read + sequential tests
-// Дозволяємо як ключ-оригінал "ЗАГАЛЬНІ ПОЛОЖЕННЯ", так і slug "zahalni-polozhennia"
-if (!function_exists('ppdr_slugify_ua')) {
-  function ppdr_slugify_ua(string $s): string {
-    $s = trim($s);
-    if ($s === '') return '';
-    $map = [
-      'А'=>'A','Б'=>'B','В'=>'V','Г'=>'H','Ґ'=>'G','Д'=>'D','Е'=>'E','Є'=>'Ye','Ж'=>'Zh','З'=>'Z','И'=>'Y','І'=>'I','Ї'=>'Yi','Й'=>'Y','К'=>'K','Л'=>'L','М'=>'M','Н'=>'N','О'=>'O','П'=>'P','Р'=>'R','С'=>'S','Т'=>'T','У'=>'U','Ф'=>'F','Х'=>'Kh','Ц'=>'Ts','Ч'=>'Ch','Ш'=>'Sh','Щ'=>'Shch','Ю'=>'Yu','Я'=>'Ya',
-      'а'=>'a','б'=>'b','в'=>'v','г'=>'h','ґ'=>'g','д'=>'d','е'=>'e','є'=>'ye','ж'=>'zh','з'=>'z','и'=>'y','і'=>'i','ї'=>'yi','й'=>'y','к'=>'k','л'=>'l','м'=>'m','н'=>'n','о'=>'o','п'=>'p','р'=>'r','с'=>'s','т'=>'t','у'=>'u','ф'=>'f','х'=>'kh','ц'=>'ts','ч'=>'ch','ш'=>'sh','щ'=>'shch','ю'=>'yu','я'=>'ya',
-      'Ь'=>'','ь'=>'','Ъ'=>'','ъ'=>'','’'=>'', '\''=>'',
-      '«'=>'','»'=>'',
-    ];
-    $s = strtr($s, $map);
-    $s = preg_replace('~[^a-zA-Z0-9]+~', '-', $s);
-    $s = trim((string)$s, '-');
-    return strtolower($s);
-  }
-}
+            if (!function_exists('ppdr_slugify_ua')) {
+                function ppdr_slugify_ua(string $s): string {
+                    $s = trim($s);
+                    if ($s === '') return '';
+                    $map = [
+                        'А'=>'A','Б'=>'B','В'=>'V','Г'=>'H','Ґ'=>'G','Д'=>'D','Е'=>'E','Є'=>'Ye','Ж'=>'Zh','З'=>'Z','И'=>'Y','І'=>'I','Ї'=>'Yi','Й'=>'Y','К'=>'K','Л'=>'L','М'=>'M','Н'=>'N','О'=>'O','П'=>'P','Р'=>'R','С'=>'S','Т'=>'T','У'=>'U','Ф'=>'F','Х'=>'Kh','Ц'=>'Ts','Ч'=>'Ch','Ш'=>'Sh','Щ'=>'Shch','Ю'=>'Yu','Я'=>'Ya',
+                        'а'=>'a','б'=>'b','в'=>'v','г'=>'h','ґ'=>'g','д'=>'d','е'=>'e','є'=>'ye','ж'=>'zh','з'=>'z','и'=>'y','і'=>'i','ї'=>'yi','й'=>'y','к'=>'k','л'=>'l','м'=>'m','н'=>'n','о'=>'o','п'=>'p','р'=>'r','с'=>'s','т'=>'t','у'=>'u','ф'=>'f','х'=>'kh','ц'=>'ts','ч'=>'ch','ш'=>'sh','щ'=>'shch','ю'=>'yu','я'=>'ya',
+                        'Ь'=>'','ь'=>'','Ъ'=>'','ъ'=>'','’'=>'', '\''=>'',
+                        '«'=>'','»'=>'',
+                    ];
+                    $s = strtr($s, $map);
+                    $s = preg_replace('~[^a-zA-Z0-9]+~', '-', $s);
+                    $s = trim((string)$s, '-');
+                    return strtolower($s);
+                }
+            }
 
-$topicSlug = $topic !== '' ? ppdr_slugify_ua($topic) : '';
+            $topicSlug = $topic !== '' ? ppdr_slugify_ua($topic) : '';
 
-$topicVal = $theoryDoneMap[$topic] ?? null;
-$slugVal  = $topicSlug !== '' ? ($theoryDoneMap[$topicSlug] ?? null) : null;
+            $topicVal = $theoryDoneMap[$topic] ?? null;
+            $slugVal  = $topicSlug !== '' ? ($theoryDoneMap[$topicSlug] ?? null) : null;
 
-$topicDone = false;
-if (is_bool($topicVal)) {
-    $topicDone = $topicVal;
-} elseif (is_array($topicVal)) {
-    $topicDone = !empty($topicVal['done']);
-}
+            $topicDone = false;
+            if (is_bool($topicVal)) {
+                $topicDone = $topicVal;
+            } elseif (is_array($topicVal)) {
+                $topicDone = !empty($topicVal['done']);
+            }
 
-$slugDone = false;
-if (is_bool($slugVal)) {
-    $slugDone = $slugVal;
-} elseif (is_array($slugVal)) {
-    $slugDone = !empty($slugVal['done']);
-}
+            $slugDone = false;
+            if (is_bool($slugVal)) {
+                $slugDone = $slugVal;
+            } elseif (is_array($slugVal)) {
+                $slugDone = !empty($slugVal['done']);
+            }
 
-$theoryOk = $topicDone || $slugDone;
+            $theoryOk = $topicDone || $slugDone;
 
-if (!$theoryOk) {
-    quiz_abort('Спочатку ознайомся з теорією по темі', [
-        'topic' => $topic,
-        'theory_url' => '/account/theory.php?topic=' . rawurlencode($topic),
-    ]);
-}
             if (!$theoryOk) {
                 quiz_abort('Спочатку ознайомся з теорією по темі', [
                     'topic' => $topic,
-                    'theory_url' => '/account/theory.php?topic=' . urlencode($topic),
+                    'theory_url' => '/account/theory.php?topic=' . rawurlencode($topic),
                 ]);
             }
+
             $order = $topicTestOrder[$topic] ?? [];
             if (!is_array($order)) $order = [];
             $posIdx = array_search($testId, $order, true);
@@ -525,7 +535,6 @@ if (!$theoryOk) {
             $missing = [];
             foreach ($rawIds as $id) {
                 $qid = (int)$id;
-                // additionally ensure qid is within cutoff set (qMap)
                 if ($qid > 0 && isset($qMap[$qid])) $filtered[] = $qid;
                 else $missing[] = $qid;
             }
@@ -541,32 +550,33 @@ if (!$theoryOk) {
             $qIds = array_values($filtered);
         }
 
-        // ===== EXAM (NEW логіка) =====
-if ($mode === 'exam' || $mode === 'exam_mix') {
-    $title = 'Іспит';
-    $topic = 'Іспит (20 питань)';
+        // ===== EXAM =====
+        if ($mode === 'exam' || $mode === 'exam_mix') {
+            $title = 'Іспит';
+            $topic = 'Іспит (20 питань)';
+            $timeLimit = 20 * 60;
 
-    // ✅ 20 хв
-    $timeLimit = 20 * 60;
+            // логіка: 2 помилки можна, на 3-й виліт
+            $mistakesAllowed = 2;
+            $failOnMistake = 3;
 
-    // ✅ дозволено 2 помилки, на 3-й — завершення
-    $mistakesAllowed = 2;
+            if ($seed === 0) $seed = 777;
+            $qIds = build_exam20_questions($topicPools, $seed);
 
-    if ($seed === 0) $seed = 777;
+            // для старої сумісності хай буде великий max, але UI беремо окремо з fail_on_mistake
+            $maxMistakes = 999999;
+        }
 
-    // 2 мед + 2..3 ТЗ + решта загальні = 20
-    $qIds = build_exam20_questions($topicPools, $seed);
-
-    // збережемо ліміт помилок в сесію (нижче)
-    $maxMistakes = 999999; // (не використовуємо як ліміт, лишимо безпечно)
-}
-
-        // ===== EXAM TOPIC (by topic + part) =====
+        // ===== EXAM TOPIC =====
         if ($mode === 'exam_topic') {
             $title = 'Іспит';
             $topic = $topicReq !== '' ? $topicReq : 'Іспит по темі';
-            $timeLimit = 40 * 60; // 40 хв
-            $maxMistakes = 10;
+            $timeLimit = 40 * 60;
+
+            // тут теж залишимо логіку "на 3-й виліт"
+            $mistakesAllowed = 2;
+            $failOnMistake = 3;
+            $maxMistakes = 999999;
 
             if ($topicReq === '' || !isset($topicPools[$topicReq]) || !is_array($topicPools[$topicReq])) {
                 quiz_abort('Невірна тема для іспиту', ['topic' => $topicReq]);
@@ -575,7 +585,6 @@ if ($mode === 'exam' || $mode === 'exam_mix') {
             $pool = $topicPools[$topicReq];
             if (count($pool) < 1) quiz_abort('В темі немає питань', ['topic' => $topicReq]);
 
-            // split to parts of 40; always return exactly 40 (last part padded by random from same pool)
             $baseParts = (int)ceil(count($pool) / 40);
             if ($partReq > $baseParts) $partReq = $baseParts;
 
@@ -584,13 +593,11 @@ if ($mode === 'exam' || $mode === 'exam_mix') {
             $chunk = array_values(array_unique(array_map('intval', $chunk)));
 
             if (count($chunk) < 40) {
-                // pad with deterministic random from remaining ids
                 $remSet = array_diff($pool, $chunk);
                 $padSeed = $seed !== 0 ? $seed : (int)abs(crc32($topicReq . '|part|' . $partReq));
                 $pad = sample_ids(array_values($remSet), 40 - count($chunk), $padSeed);
                 $chunk = array_values(array_unique(array_merge($chunk, $pad)));
 
-                // if still < 40 (rare) allow reuse
                 if (count($chunk) < 40) {
                     $more = sample_ids($pool, 40 - count($chunk), $padSeed + 1);
                     $chunk = array_values(array_merge($chunk, $more));
@@ -604,9 +611,10 @@ if ($mode === 'exam' || $mode === 'exam_mix') {
         // ===== TRAINER =====
         if ($mode === 'trainer' || $mode === 'trainer_mix' || $mode === 'trainer_topic') {
             $title = 'Тренажер';
-            $timeLimit = 0;        // unlimited
-            $maxMistakes = null;   // unlimited
-            $mistakesAllowed = null; // unlimited
+            $timeLimit = 0;
+            $maxMistakes = null;
+            $mistakesAllowed = null;
+            $failOnMistake = null;
 
             if ($mode === 'trainer_topic') {
                 if ($topicReq === '' || !isset($topicPools[$topicReq]) || !is_array($topicPools[$topicReq])) {
@@ -640,8 +648,8 @@ if ($mode === 'exam' || $mode === 'exam_mix') {
                 $topic = $topicReq;
             }
 
-                        if ($mode === 'trainer_mix' || $mode === 'trainer') {
-                $repeatMistakes = !empty($_POST['mistakes']);
+            if ($mode === 'trainer_mix' || $mode === 'trainer') {
+                $repeatMistakes = !empty($_POST['mistakes']) || $mistakesOnly;
 
                 if ($repeatMistakes) {
                     $mistakeIds = [];
@@ -681,6 +689,7 @@ if ($mode === 'exam' || $mode === 'exam_mix') {
                     if ($seed === 0) $seed = 777;
                     $qIds = sample_ids($mistakeIds, min(40, count($mistakeIds)), $seed);
                     $topic = 'Повтор помилок';
+                    $mistakesOnly = true;
                 } else {
                     $all = array_keys($qMap);
                     if (count($all) < 40) {
@@ -697,6 +706,52 @@ if ($mode === 'exam' || $mode === 'exam_mix') {
             }
         }
 
+        // ===== MISTAKES (explicit mode) =====
+        if ($mode === 'mistakes') {
+            $title = 'Тренажер';
+            $topic = 'Повтор помилок';
+            $timeLimit = 0;
+            $maxMistakes = null;
+            $mistakesAllowed = null;
+            $failOnMistake = null;
+            $mistakesOnly = true;
+
+            $mistakeIds = [];
+            try {
+                $pdo = db();
+
+                $st = $pdo->prepare("
+                    SELECT DISTINCT question_id
+                    FROM user_mistakes
+                    WHERE user_id = :uid
+                    ORDER BY created_at DESC
+                ");
+                $st->execute([':uid' => (string)$uid]);
+
+                $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+
+                foreach ($rows as $r) {
+                    $qid = (int)($r['question_id'] ?? 0);
+                    if ($qid > 0 && isset($qMap[$qid])) {
+                        $mistakeIds[] = $qid;
+                    }
+                }
+
+                $mistakeIds = array_values(array_unique($mistakeIds));
+            } catch (Throwable $e) {
+                $mistakeIds = [];
+            }
+
+            if (count($mistakeIds) < 1) {
+                quiz_abort('Немає помилок для повтору', [
+                    'mode' => 'mistakes',
+                ]);
+            }
+
+            if ($seed === 0) $seed = 777;
+            $qIds = sample_ids($mistakeIds, min(40, count($mistakeIds)), $seed);
+        }
+
         if (!is_array($qIds) || count($qIds) < 1) {
             quiz_abort('Не вдалося сформувати список питань', [
                 'mode' => $mode,
@@ -706,124 +761,144 @@ if ($mode === 'exam' || $mode === 'exam_mix') {
             ]);
         }
 
-        // Build quiz session
         $_SESSION['quiz'] = [
-    'mode' => $mode,
-    'test_id' => $testId,
-    'title' => $title,
-    'topic' => $topic,
+            'mode' => $mode,
+            'test_id' => $testId,
+            'title' => $title,
+            'topic' => $topic,
 
-    'time_limit' => $timeLimit,
-    'time_limit_sec' => $timeLimit,
+            'time_limit' => $timeLimit,
+            'time_limit_sec' => $timeLimit,
 
-    'max_mistakes' => is_null($maxMistakes) ? null : (int)$maxMistakes,
-    'mistakes_allowed' => isset($mistakesAllowed) ? (int)$mistakesAllowed : null,
+            'max_mistakes' => is_null($maxMistakes) ? null : (int)$maxMistakes,
+            'mistakes_allowed' => isset($mistakesAllowed) ? (int)$mistakesAllowed : null,
+            'fail_on_mistake' => isset($failOnMistake) ? (int)$failOnMistake : null,
+            'mistakes_ui_limit' => isset($failOnMistake) ? (int)$failOnMistake : (is_null($maxMistakes) ? null : (int)$maxMistakes),
 
-    'started_at' => time(),
-    'q_ids' => array_values($qIds),
-    'idx' => 0,
-    'total' => count($qIds),
+            'started_at' => time(),
+            'q_ids' => array_values($qIds),
+            'idx' => 0,
+            'total' => count($qIds),
 
-    'answers' => [],
-    'wrong_qids' => [],
-    'mistakes' => 0,
+            'answers' => [],
+            'wrong_qids' => [],
+            'mistakes' => 0,
 
-    'seed' => $seed,
-];
-
-        quiz_redirect('/account/quiz.php');
-        }
-// ДАЛІ ТВОЯ ОРИГІНАЛЬНА HTML/RENDER-ЧАСТИНА ФАЙЛУ БЕЗ УРІЗОК
-
-    if ($action === 'answer') {
-    if (!isset($_SESSION['quiz']) || !is_array($_SESSION['quiz']) || !quiz_session_is_valid($_SESSION['quiz'])) {
-        quiz_redirect('/account/tests.php');
-    }
-
-    $quiz = $_SESSION['quiz'];
-
-    $choice = (int)($_POST['choice'] ?? 0);
-    $idx = (int)($quiz['idx'] ?? 0);
-    $qIds = $quiz['q_ids'] ?? [];
-    $total = (int)($quiz['total'] ?? 0);
-
-    if (!is_array($qIds) || $idx < 0 || $idx >= $total) {
-        quiz_redirect('/account/quiz.php?action=finish');
-    }
-
-    $qid = (int)$qIds[$idx];
-    $q = $qMap[$qid] ?? null;
-    if (!is_array($q)) {
-        quiz_abort('Питання не знайдено', ['qid' => $qid, 'idx' => $idx]);
-    }
-
-    $correct = (int)$q['correct'];
-    $isCorrect = ($choice === $correct);
-
-    if (!isset($quiz['answers']) || !is_array($quiz['answers'])) $quiz['answers'] = [];
-    if (!isset($quiz['wrong_qids']) || !is_array($quiz['wrong_qids'])) $quiz['wrong_qids'] = [];
-    if (!isset($quiz['mistakes']) || !is_int($quiz['mistakes'])) $quiz['mistakes'] = 0;
-
-    if (!array_key_exists((string)$idx, $quiz['answers'])) {
-        $quiz['answers'][(string)$idx] = [
-            'qid' => $qid,
-            'choice' => $choice,
-            'correct' => $correct,
-            'is_correct' => $isCorrect,
-            'at' => time(),
+            'seed' => $seed,
+            'mistakes_only' => $mistakesOnly ? 1 : 0,
+            'mistakes_fixed_qids' => [],
         ];
 
+        quiz_redirect('/account/quiz.php');
+    }
+
+    if ($action === 'answer') {
+        if (!isset($_SESSION['quiz']) || !is_array($_SESSION['quiz']) || !quiz_session_is_valid($_SESSION['quiz'])) {
+            quiz_redirect('/account/tests.php');
+        }
+
+        $quiz = $_SESSION['quiz'];
+
+        $choice = (int)($_POST['choice'] ?? 0);
+        $idx = (int)($quiz['idx'] ?? 0);
+        $qIds = $quiz['q_ids'] ?? [];
+        $total = (int)($quiz['total'] ?? 0);
+
+        if (!is_array($qIds) || $idx < 0 || $idx >= $total) {
+            quiz_redirect('/account/quiz.php?action=finish');
+        }
+
+        $qid = (int)$qIds[$idx];
+        $q = $qMap[$qid] ?? null;
+        if (!is_array($q)) {
+            quiz_abort('Питання не знайдено', ['qid' => $qid, 'idx' => $idx]);
+        }
+
+        $correct = (int)$q['correct'];
+        $isCorrect = ($choice === $correct);
+
+        if (!isset($quiz['answers']) || !is_array($quiz['answers'])) $quiz['answers'] = [];
+        if (!isset($quiz['wrong_qids']) || !is_array($quiz['wrong_qids'])) $quiz['wrong_qids'] = [];
+        if (!isset($quiz['mistakes']) || !is_int($quiz['mistakes'])) $quiz['mistakes'] = 0;
+        if (!isset($quiz['mistakes_fixed_qids']) || !is_array($quiz['mistakes_fixed_qids'])) $quiz['mistakes_fixed_qids'] = [];
+
+        if (!array_key_exists((string)$idx, $quiz['answers'])) {
+            $quiz['answers'][(string)$idx] = [
+                'qid' => $qid,
+                'choice' => $choice,
+                'correct' => $correct,
+                'is_correct' => $isCorrect,
+                'at' => time(),
+            ];
+
+            $modeNow = (string)($quiz['mode'] ?? '');
+            $isTrainerMode = (strpos($modeNow, 'trainer') === 0) || $modeNow === 'mistakes';
+            $isMistakesOnly = !empty($quiz['mistakes_only']);
+
+            if ($choice > 0 && !$isCorrect) {
+                $quiz['wrong_qids'][] = $qid;
+                $quiz['wrong_qids'] = array_values(array_unique(array_map('intval', $quiz['wrong_qids'])));
+                $quiz['mistakes'] = count($quiz['wrong_qids']);
+
+                // завжди в загальний bucket
+                progress_add_mistakes((string)$uid, 0, [$qid]);
+
+                // у звичайний тест — ще й по test_id
+                $testIdNow = (int)($quiz['test_id'] ?? 0);
+                if (!$isTrainerMode && $testIdNow > 0) {
+                    progress_add_mistakes((string)$uid, $testIdNow, [$qid]);
+                }
+            } else {
+                // якщо це повтор помилок — правильна відповідь прибирає питання зі списку помилок
+                if ($isMistakesOnly && $choice > 0 && $isCorrect) {
+                    $quiz['mistakes_fixed_qids'][] = $qid;
+                    $quiz['mistakes_fixed_qids'] = array_values(array_unique(array_map('intval', $quiz['mistakes_fixed_qids'])));
+                    quiz_remove_mistakes((string)$uid, [$qid]);
+                }
+
+                $quiz['mistakes'] = count($quiz['wrong_qids']);
+            }
+        }
+
+        $_SESSION['quiz'] = $quiz;
+
+        $mistakesNow = (int)($quiz['mistakes'] ?? 0);
         $modeNow = (string)($quiz['mode'] ?? '');
-        $isTrainerMode = (strpos($modeNow, 'trainer') === 0);
+        $isTrainer = (strpos($modeNow, 'trainer') === 0) || $modeNow === 'mistakes';
 
-        if ($choice > 0 && !$isCorrect) {
-            $quiz['wrong_qids'][] = $qid;
-            $quiz['wrong_qids'] = array_values(array_unique(array_map('intval', $quiz['wrong_qids'])));
-            $quiz['mistakes'] = count($quiz['wrong_qids']);
+        if (!$isTrainer) {
+            $failOnMistake = $quiz['fail_on_mistake'] ?? null;
+            $failOnMistake = is_null($failOnMistake) ? null : (int)$failOnMistake;
 
-            // ✅ пишемо в загальний bucket повтору помилок
-            progress_add_mistakes((string)$uid, 0, [$qid]);
+            if ($failOnMistake !== null) {
+                // виліт на 3-й
+                if ($mistakesNow >= $failOnMistake) {
+                    quiz_redirect('/account/quiz.php?action=finish');
+                }
+            } else {
+                $allowed = $quiz['mistakes_allowed'] ?? null;
+                $allowed = is_null($allowed) ? null : (int)$allowed;
 
-            // ✅ окремо пишемо по тесту тільки для звичайних тестів
-            $testIdNow = (int)($quiz['test_id'] ?? 0);
-            if (!$isTrainerMode && $testIdNow > 0) {
-                progress_add_mistakes((string)$uid, $testIdNow, [$qid]);
-            }
-        } else {
-            $quiz['mistakes'] = count($quiz['wrong_qids']);
-        }
-    }
-
-    $_SESSION['quiz'] = $quiz;
-
-    $mistakesNow = (int)($quiz['mistakes'] ?? 0);
-    $modeNow = (string)($quiz['mode'] ?? '');
-    $isTrainer = (strpos($modeNow, 'trainer') === 0);
-
-    if (!$isTrainer) {
-        $allowed = $quiz['mistakes_allowed'] ?? null;
-        $allowed = is_null($allowed) ? null : (int)$allowed;
-
-        if ($allowed !== null) {
-            // для іспиту: 2 помилки можна, на 3-й виліт
-            if ($mistakesNow > $allowed) {
-                quiz_redirect('/account/quiz.php?action=finish');
-            }
-        } else {
-            $maxMistakesNow = (int)($quiz['max_mistakes'] ?? 10);
-            if ($mistakesNow >= $maxMistakesNow) {
-                quiz_redirect('/account/quiz.php?action=finish');
+                if ($allowed !== null) {
+                    if ($mistakesNow > $allowed) {
+                        quiz_redirect('/account/quiz.php?action=finish');
+                    }
+                } else {
+                    $maxMistakesNow = (int)($quiz['max_mistakes'] ?? 10);
+                    if ($mistakesNow >= $maxMistakesNow) {
+                        quiz_redirect('/account/quiz.php?action=finish');
+                    }
+                }
             }
         }
-    }
 
-    $answered = is_array($quiz['answers']) ? count($quiz['answers']) : 0;
-    if ($answered >= $total) {
-        quiz_redirect('/account/quiz.php?action=finish');
-    }
+        $answered = is_array($quiz['answers']) ? count($quiz['answers']) : 0;
+        if ($answered >= $total) {
+            quiz_redirect('/account/quiz.php?action=finish');
+        }
 
-    quiz_redirect('/account/quiz.php');
-}
+        quiz_redirect('/account/quiz.php');
+    }
 
     if ($action === 'go') {
         if (!isset($_SESSION['quiz']) || !is_array($_SESSION['quiz']) || !quiz_session_is_valid($_SESSION['quiz'])) {
@@ -862,52 +937,57 @@ if ($action === 'finish') {
     $started = (int)($quiz['started_at'] ?? time());
     $spent = time() - $started;
 
+    $failOnMistake = $quiz['fail_on_mistake'] ?? null;
+    $failOnMistake = is_null($failOnMistake) ? null : (int)$failOnMistake;
+
     $allowed = $quiz['mistakes_allowed'] ?? null;
-$allowed = is_null($allowed) ? null : (int)$allowed;
+    $allowed = is_null($allowed) ? null : (int)$allowed;
 
-if ($allowed !== null) {
-    $maxMistakes = $allowed; // для UI
-    $passed = ($mistakes <= $allowed) && ($answered >= $total) && ($total > 0);
-} else {
-    $modeNow = (string)($quiz['mode'] ?? '');
-    $isTrainer = (strpos($modeNow, 'trainer') === 0);
+    if ($failOnMistake !== null) {
+        $maxMistakes = $failOnMistake; // UI: 3
+        $passed = ($mistakes < $failOnMistake) && ($answered >= $total) && ($total > 0);
+    } elseif ($allowed !== null) {
+        $maxMistakes = $allowed;
+        $passed = ($mistakes <= $allowed) && ($answered >= $total) && ($total > 0);
+    } else {
+        $modeNow = (string)($quiz['mode'] ?? '');
+        $isTrainer = (strpos($modeNow, 'trainer') === 0) || $modeNow === 'mistakes';
 
-    $maxMistakes = (int)($quiz['max_mistakes'] ?? ($isTrainer ? 999999 : 3));
-    $passed = ($mistakes < $maxMistakes) && ($answered >= $total) && ($total > 0);
-}
+        $maxMistakes = (int)($quiz['max_mistakes'] ?? ($isTrainer ? 999999 : 3));
+        $passed = ($mistakes < $maxMistakes) && ($answered >= $total) && ($total > 0);
+    }
+
     if ($timeLimit > 0 && $spent > $timeLimit) $passed = false;
 
-    // ✅ Persist progress
-$mode = (string)($quiz['mode'] ?? 'test');
-$testId = (int)($quiz['test_id'] ?? 0);
+    $mode = (string)($quiz['mode'] ?? 'test');
+    $testId = (int)($quiz['test_id'] ?? 0);
+    $isMistakesOnly = !empty($quiz['mistakes_only']);
 
-// збираємо wrong qids з answers
-$wrongQids = [];
-foreach ($answers as $a) {
-  if (!is_array($a)) continue;
-  if (!empty($a['qid']) && array_key_exists('is_correct', $a) && $a['is_correct'] === false) {
-    $wrongQids[] = (int)$a['qid'];
-  }
-}
-$wrongQids = array_values(array_unique(array_filter($wrongQids, fn($x)=> (int)$x > 0)));
+    $wrongQids = [];
+    foreach ($answers as $a) {
+        if (!is_array($a)) continue;
+        if (!empty($a['qid']) && array_key_exists('is_correct', $a) && $a['is_correct'] === false) {
+            $wrongQids[] = (int)$a['qid'];
+        }
+    }
+    $wrongQids = array_values(array_unique(array_filter($wrongQids, fn($x)=> (int)$x > 0)));
 
-// ✅ ВАЖЛИВО: тренажер НЕ пишемо в статистику (якщо хочеш — скажеш, зробимо)
-$isTrainerMode = (strpos($mode, 'trainer') === 0);
+    $isTrainerMode = (strpos($mode, 'trainer') === 0) || $mode === 'mistakes';
 
-if (!$isTrainerMode && count($wrongQids) > 0) {
-  // 1) завжди пишемо в загальний bucket (ALL)
-  progress_add_mistakes((string)$uid, 0, $wrongQids);
+    if (!$isTrainerMode && count($wrongQids) > 0) {
+        progress_add_mistakes((string)$uid, 0, $wrongQids);
+        if ($testId > 0) {
+            progress_add_mistakes((string)$uid, $testId, $wrongQids);
+        }
+    }
 
-  // 2) якщо це реальний тест з id — пишемо ще й в його bucket
-  if ($testId > 0) {
-    progress_add_mistakes((string)$uid, $testId, $wrongQids);
-  }
-}
+    if ($isMistakesOnly && !empty($quiz['mistakes_fixed_qids']) && is_array($quiz['mistakes_fixed_qids'])) {
+        quiz_remove_mistakes((string)$uid, $quiz['mistakes_fixed_qids']);
+    }
 
-// passed (тільки для звичайного теста з id)
-if ($passed && $mode === 'test' && $testId > 0) {
-  progress_mark_passed((string)$uid, $testId);
-}
+    if ($passed && $mode === 'test' && $testId > 0) {
+        progress_mark_passed((string)$uid, $testId);
+    }
 
     $csrf = csrf_token();
     ?>
@@ -944,7 +1024,12 @@ if ($passed && $mode === 'test' && $testId > 0) {
 
             <div class="pp-row">
                 <div class="pp-pill">Відповіді: <?= (int)$answered ?> / <?= (int)$total ?></div>
-                <div class="pp-pill">Помилки: <?= (int)$mistakes ?> / <?= (int)$maxMistakes ?></div>
+                <?php if ($maxMistakes >= 999999): ?>
+                    <div class="pp-pill">Помилки: <?= (int)$mistakes ?></div>
+                <?php else: ?>
+                    <div class="pp-pill">Помилки: <?= (int)$mistakes ?> / <?= (int)$maxMistakes ?></div>
+                <?php endif; ?>
+
                 <?php if ($timeLimit > 0): ?>
                     <div class="pp-pill">Час: <?= h(format_mmss((int)$spent)) ?> (ліміт <?= h(format_mmss((int)$timeLimit)) ?>)</div>
                 <?php else: ?>
@@ -1007,7 +1092,6 @@ $started = (int)($quiz['started_at'] ?? time());
 $spent = time() - $started;
 $timeLeft = $timeLimit > 0 ? max(0, $timeLimit - $spent) : 0;
 
-// time over -> finish (only if limited)
 if ($timeLimit > 0 && $spent > $timeLimit) {
     quiz_redirect('/account/quiz.php?action=finish');
 }
@@ -1203,38 +1287,44 @@ $topic = (string)($quiz['topic'] ?? '');
             <div class="pp-bar">
                 <div class="pp-bar__left">
                     <div class="pp-pill"><small>Питання</small> <span><?= (int)($idx+1) ?></span>/<span><?= (int)$total ?></span></div>
-                    <?php $isTrainerMode = strpos((string)$quiz['mode'], 'trainer') === 0; ?>
 
-<?php
-if (!isset($mistakes) || !is_int($mistakes)) {
-    $mistakes = (int)($_SESSION['quiz']['mistakes'] ?? 0);
-}
+                    <?php
+                    $isTrainerMode = strpos((string)$quiz['mode'], 'trainer') === 0 || (string)$quiz['mode'] === 'mistakes';
 
-if (!isset($maxMistakes) || !is_int($maxMistakes)) {
-    $modeSafe = (string)($_SESSION['quiz']['mode'] ?? 'test');
-    $maxMistakes = (int)($_SESSION['quiz']['max_mistakes'] ?? 0);
+                    if (!isset($mistakes) || !is_int($mistakes)) {
+                        $mistakes = (int)($_SESSION['quiz']['mistakes'] ?? 0);
+                    }
 
-    if ($maxMistakes <= 0) {
-        if ($modeSafe === 'exam' || $modeSafe === 'exam_mix') {
-            $maxMistakes = 2;
-        } elseif (strpos($modeSafe, 'trainer') === 0) {
-            $maxMistakes = 0;
-        } else {
-            $maxMistakes = 10;
-        }
-    }
-}
-?>
+                    $uiLimit = $_SESSION['quiz']['mistakes_ui_limit'] ?? null;
+                    $uiLimit = is_null($uiLimit) ? null : (int)$uiLimit;
 
-<div class="pp-pill">
-    <small>Помилки</small>
+                    if (!isset($maxMistakes) || !is_int($maxMistakes)) {
+                        $modeSafe = (string)($_SESSION['quiz']['mode'] ?? 'test');
+                        $maxMistakes = (int)($_SESSION['quiz']['max_mistakes'] ?? 0);
 
-    <?php if ($isTrainerMode): ?>
-        <span id="mistakesNow"><?= (int)$mistakes ?></span>
-    <?php else: ?>
-        <span id="mistakesNow"><?= (int)$mistakes ?></span>/<span><?= (int)$maxMistakes ?></span>
-    <?php endif; ?>
-</div>
+                        if ($uiLimit !== null && $uiLimit > 0) {
+                            $maxMistakes = $uiLimit;
+                        } elseif ($maxMistakes <= 0) {
+                            if ($modeSafe === 'exam' || $modeSafe === 'exam_mix' || $modeSafe === 'exam_topic') {
+                                $maxMistakes = 3;
+                            } elseif (strpos($modeSafe, 'trainer') === 0 || $modeSafe === 'mistakes') {
+                                $maxMistakes = 0;
+                            } else {
+                                $maxMistakes = 10;
+                            }
+                        }
+                    }
+                    ?>
+
+                    <div class="pp-pill">
+                        <small>Помилки</small>
+
+                        <?php if ($isTrainerMode): ?>
+                            <span id="mistakesNow"><?= (int)$mistakes ?></span>
+                        <?php else: ?>
+                            <span id="mistakesNow"><?= (int)$mistakes ?></span>/<span><?= (int)$maxMistakes ?></span>
+                        <?php endif; ?>
+                    </div>
 
                     <?php if ($timeLimit > 0): ?>
                         <div class="pp-pill"><small>Час</small> <span id="timerText"><?= h(format_mmss((int)$timeLeft)) ?></span> / <span><?= h(format_mmss((int)$timeLimit)) ?></span></div>

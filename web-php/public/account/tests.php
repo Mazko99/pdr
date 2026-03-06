@@ -10,15 +10,11 @@ if (session_status() !== PHP_SESSION_ACTIVE) {
     @session_start();
 }
 
-// 1) Треба бути залогіненим
 if (!auth_user_id()) {
     redirect('/login');
 }
 
-// 2) Підтягнути актуальний доступ/план
 auth_refresh_access();
-
-// 3) Перевірка політики "1 активний пристрій"
 auth_enforce_device_policy();
 
 $uid = (string)auth_user_id();
@@ -27,39 +23,6 @@ if ($uid === '') {
     exit;
 }
 
-$mistakes = !empty($_GET['mistakes']);
-$mistakeIds = [];
-
-if ($mistakes) {
-    try {
-        $pdo = db();
-
-        $st = $pdo->prepare("
-            SELECT DISTINCT question_id
-            FROM user_mistakes
-            WHERE user_id = :uid
-            ORDER BY created_at DESC
-        ");
-        $st->execute([':uid' => $uid]);
-
-        $rows = $st->fetchAll(PDO::FETCH_ASSOC);
-
-        foreach ($rows as $r) {
-            $qid = (int)($r['question_id'] ?? 0);
-            if ($qid > 0) {
-                $mistakeIds[] = $qid;
-            }
-        }
-
-        $mistakeIds = array_values(array_unique($mistakeIds));
-    } catch (Throwable $e) {
-        $mistakeIds = [];
-    }
-}
-
-/**
- * Доступ рахуємо по users_store
- */
 function ppdr_user_has_access(?array $u): bool
 {
     if (!is_array($u)) return false;
@@ -113,28 +76,8 @@ function theory_done_for_topic(array $theoryDoneMap, string $topicName): bool
     return $theoryDone;
 }
 
-function all_tests_passed(array $testIds, array $passedTests): bool
-{
-    if (empty($testIds)) return false;
-
-    foreach ($testIds as $tid) {
-        $tid = (int)$tid;
-        if ($tid <= 0) continue;
-        if (empty($passedTests[(string)$tid])) {
-            return false;
-        }
-    }
-
-    return true;
-}
-
-// беремо актуального юзера
 $userNow = function_exists('user_find_by_id') ? user_find_by_id($uid) : null;
-
-// рахуємо доступ
 $hasAccess = ppdr_user_has_access($userNow);
-
-// синхронізуємо сесію
 $_SESSION['has_access'] = $hasAccess ? 1 : 0;
 
 if (is_array($userNow)) {
@@ -142,18 +85,6 @@ if (is_array($userNow)) {
     $_SESSION['expires_at'] = (string)($userNow['expires_at'] ?? '');
 }
 
-// debug
-if (isset($_GET['dbg'])) {
-    header('Content-Type: text/plain; charset=utf-8');
-    echo "uid=" . $uid . "\n";
-    echo "session_has_access=" . (int)!empty($_SESSION['has_access']) . "\n";
-    echo "plan=" . (is_array($userNow) ? ($userNow['plan'] ?? '') : 'NOUSER') . "\n";
-    echo "expires_at=" . (is_array($userNow) ? ($userNow['expires_at'] ?? '') : '') . "\n";
-    echo "now=" . date('c') . "\n";
-    exit;
-}
-
-$hasAccess = !empty($_SESSION['has_access']);
 if (!$hasAccess) {
     http_response_code(200);
     ?>
@@ -174,7 +105,6 @@ if (!$hasAccess) {
                 <div class="account-card">
                     <h2 class="h2">Доступ обмежено</h2>
                     <p class="lead">Щоб відкрити тести, тренажер та іспит — активуй підписку.</p>
-
                     <div style="margin-top:14px; display:flex; gap:10px; flex-wrap:wrap;">
                         <a class="btn btn--primary" href="/account/index.php?tab=dashboard#pricing">Обрати тариф</a>
                         <a class="btn btn--ghost" href="/account/index.php">В кабінет</a>
@@ -188,18 +118,15 @@ if (!$hasAccess) {
     exit;
 }
 
-$mode = (string)($_GET['mode'] ?? 'tests'); // tests | exam | trainer
+$mode = (string)($_GET['mode'] ?? 'tests');
 $mode = in_array($mode, ['tests', 'exam', 'trainer'], true) ? $mode : 'tests';
-$mistakes = !empty($_GET['mistakes']);
+$mistakesMode = !empty($_GET['mistakes']);
 
-// НАЛАШТУВАННЯ
 const EXAM_QUESTIONS = 20;
-const EXAM_TIME_SEC  = 20 * 60; // 20 хв
-const EXAM_MISTAKES  = 2;
+const EXAM_TIME_SEC  = 20 * 60;
+const EXAM_MISTAKES  = 3;
 
-const TRAINER_QUESTIONS = 40; // 40 питань, без часу
-
-// Обрізка до цієї теми включно
+const TRAINER_QUESTIONS = 40;
 const CUTOFF_TOPIC = 'ДОДАТКОВІ ПИТАННЯ ЩОДО КАТЕГОРІЙ В1, В (БУДОВА І ТЕРМІНИ)';
 
 $DATA_DIR = __DIR__ . '/../data';
@@ -208,30 +135,24 @@ $questionsFile = $DATA_DIR . '/questions_export.json';
 
 if (!is_file($testsFile) || !is_file($questionsFile)) {
     http_response_code(500);
-    echo "Не знайдено data-файли. Очікую: {$testsFile} та {$questionsFile}";
+    echo "Не знайдено data-файли.";
     exit;
 }
 
-// load JSON with BOM-strip
 $testsRaw = (string)file_get_contents($testsFile);
 if (strncmp($testsRaw, "\xEF\xBB\xBF", 3) === 0) {
     $testsRaw = substr($testsRaw, 3);
 }
 $testsAll = json_decode($testsRaw, true);
-if (!is_array($testsAll)) {
-    $testsAll = [];
-}
+if (!is_array($testsAll)) $testsAll = [];
 
 $questionsRaw = (string)file_get_contents($questionsFile);
 if (strncmp($questionsRaw, "\xEF\xBB\xBF", 3) === 0) {
     $questionsRaw = substr($questionsRaw, 3);
 }
 $questions = json_decode($questionsRaw, true);
-if (!is_array($questions)) {
-    $questions = [];
-}
+if (!is_array($questions)) $questions = [];
 
-// qMap
 $qMap = [];
 foreach ($questions as $q) {
     if (!is_array($q)) continue;
@@ -241,25 +162,17 @@ foreach ($questions as $q) {
     }
 }
 
-/**
- * Прогрес користувача
- */
 $uProg = progress_user_get($uid);
 
 $passedTests = $uProg['passed_tests'] ?? [];
-if (!is_array($passedTests)) {
-    $passedTests = [];
-}
+if (!is_array($passedTests)) $passedTests = [];
 
 $theoryDoneMap = $uProg['theory_done'] ?? [];
-if (!is_array($theoryDoneMap)) {
-    $theoryDoneMap = [];
-}
+if (!is_array($theoryDoneMap)) $theoryDoneMap = [];
 
-/**
- * Обрізаємо список тестів/тем:
- * залишаємо все по порядку ДО і ВКЛЮЧНО теми CUTOFF_TOPIC.
- */
+$mistakeIds = progress_all_mistakes_ids($uid);
+$mistakesCount = count($mistakeIds);
+
 $tests = [];
 $cutFound = false;
 foreach ($testsAll as $t) {
@@ -276,7 +189,6 @@ if (!$cutFound) {
     $tests = $testsAll;
 }
 
-// group tests by topic
 $topics = [];
 foreach ($tests as $t) {
     if (!is_array($t)) continue;
@@ -284,15 +196,8 @@ foreach ($tests as $t) {
     $topics[$topic][] = $t;
 }
 
-// підготовка пулів питань по темах
-$topicPools = [];      // topic => unique qids
-$topicPoolsCount = []; // topic => count
-$allPool = [];         // all allowed qids
-$allowedQidSet = [];   // qid => true
-
-// айді тестів по темах
-$topicTestIds = []; // topic => [testId1, testId2, ...]
-$allTestIds   = []; // всі test_id
+$topicPools = [];
+$topicTestIds = [];
 
 foreach ($topics as $topicName => $items) {
     $set = [];
@@ -306,45 +211,26 @@ foreach ($topics as $topicName => $items) {
         if (is_array($qids)) {
             foreach ($qids as $qid) {
                 $qid = (int)$qid;
-                if ($qid > 0) {
-                    $set[$qid] = true;
-                    $allowedQidSet[$qid] = true;
-                }
+                if ($qid > 0) $set[$qid] = true;
             }
         }
 
         $tid = (int)($t['id'] ?? 0);
-        if ($tid > 0) {
-            $tids[] = $tid;
-            $allTestIds[$tid] = true;
-        }
+        if ($tid > 0) $tids[] = $tid;
     }
 
     $pool = array_keys($set);
     sort($pool);
     $topicPools[$topicName] = $pool;
-    $topicPoolsCount[$topicName] = count($pool);
 
     $tids = array_values(array_unique($tids));
     sort($tids);
     $topicTestIds[$topicName] = $tids;
 }
 
-foreach ($allowedQidSet as $qid => $_) {
-    $qid = (int)$qid;
-    if ($qid > 0 && isset($qMap[$qid])) {
-        $allPool[] = $qid;
-    }
-}
-sort($allPool);
-
 $title = 'Підготовчі запитання до іспиту';
-if ($mode === 'exam') {
-    $title = 'Іспит як в СЦ';
-}
-if ($mode === 'trainer') {
-    $title = 'Тренажер';
-}
+if ($mode === 'exam') $title = 'Іспит як в СЦ';
+if ($mode === 'trainer') $title = 'Тренажер';
 
 $csrf = csrf_token();
 ?>
@@ -394,7 +280,7 @@ $csrf = csrf_token();
                         <div class="test-card__meta">
                             <span>Питань: <b><?php echo (int)EXAM_QUESTIONS; ?></b></span>
                             <span>Час: <b><?php echo (int)round(EXAM_TIME_SEC / 60); ?> хв</b></span>
-                            <span>Допустимо помилок: <b><?php echo (int)EXAM_MISTAKES; ?></b></span>
+                            <span>Помилок до завершення: <b><?php echo (int)EXAM_MISTAKES; ?></b></span>
                         </div>
                     </div>
 
@@ -417,26 +303,52 @@ $csrf = csrf_token();
                     <h3 class="h3">Тренажер (всі теми)</h3>
                 </div>
 
-                <div class="test-card">
-                    <div class="test-card__left">
-                        <div class="test-card__title">
-                            <?php echo $mistakes ? 'Робота над помилками' : 'Змішаний тренажер'; ?>
+                <div class="topic-tests">
+                    <div class="test-card">
+                        <div class="test-card__left">
+                            <div class="test-card__title">Змішаний тренажер</div>
+                            <div class="test-card__meta">
+                                <span>Питань: <b><?php echo (int)TRAINER_QUESTIONS; ?></b></span>
+                                <span>Час: <b>без обмежень</b></span>
+                                <span>Помилок: <b>без обмежень</b></span>
+                            </div>
                         </div>
-                        <div class="test-card__meta">
-                            <span>Питань: <b><?php echo (int)TRAINER_QUESTIONS; ?></b></span>
-                            <span>Час: <b>без обмежень</b></span>
-                            <span>Помилок: <b>без обмежень</b></span>
+
+                        <div class="test-card__right">
+                            <form method="post" action="/account/quiz.php">
+                                <input type="hidden" name="csrf" value="<?php echo h($csrf); ?>">
+                                <input type="hidden" name="action" value="start">
+                                <input type="hidden" name="mode" value="trainer_mix">
+                                <input type="hidden" name="seed" value="<?php echo (int)random_int(1, 1000000000); ?>">
+                                <button class="btn btn--primary" type="submit">Почати</button>
+                            </form>
                         </div>
                     </div>
 
-                    <div class="test-card__right">
-                        <form method="post" action="/account/quiz.php">
-                            <input type="hidden" name="csrf" value="<?php echo h($csrf); ?>">
-                            <input type="hidden" name="action" value="start">
-                            <input type="hidden" name="mode" value="<?php echo $mistakes ? 'mistakes' : 'trainer_mix'; ?>">
-                            <input type="hidden" name="seed" value="<?php echo (int)random_int(1, 1000000000); ?>">
-                            <button class="btn btn--primary" type="submit">Почати</button>
-                        </form>
+                    <div class="test-card">
+                        <div class="test-card__left">
+                            <div class="test-card__title">Повтор помилок</div>
+                            <div class="test-card__meta">
+                                <span>Питань з помилок: <b><?php echo (int)$mistakesCount; ?></b></span>
+                                <span>Режим: <b>лише помилкові</b></span>
+                            </div>
+                        </div>
+
+                        <div class="test-card__right">
+                            <?php if ($mistakesCount > 0): ?>
+                                <form method="post" action="/account/quiz.php">
+                                    <input type="hidden" name="csrf" value="<?php echo h($csrf); ?>">
+                                    <input type="hidden" name="action" value="start">
+                                    <input type="hidden" name="mode" value="mistakes">
+                                    <input type="hidden" name="seed" value="<?php echo (int)random_int(1, 1000000000); ?>">
+                                    <button class="btn btn--primary" type="submit">Повторити</button>
+                                </form>
+                            <?php else: ?>
+                                <button class="btn btn--primary" type="button" disabled aria-disabled="true" style="opacity:.55;cursor:not-allowed;">
+                                    Немає помилок
+                                </button>
+                            <?php endif; ?>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -447,9 +359,7 @@ $csrf = csrf_token();
                 if ($total < 1) continue;
 
                 $parts = (int)ceil($total / TRAINER_QUESTIONS);
-                if ($parts < 1) {
-                    $parts = 1;
-                }
+                if ($parts < 1) $parts = 1;
                 ?>
                 <div class="topic-block">
                     <div class="topic-block__head">
@@ -467,6 +377,7 @@ $csrf = csrf_token();
                                         <span>Помилок: <b>без обмежень</b></span>
                                     </div>
                                 </div>
+
                                 <div class="test-card__right">
                                     <form method="post" action="/account/quiz.php">
                                         <input type="hidden" name="csrf" value="<?php echo h($csrf); ?>">
@@ -491,9 +402,7 @@ $csrf = csrf_token();
                 $theoryDone = theory_done_for_topic($theoryDoneMap, $topicName);
 
                 $orderIds = $topicTestIds[$topicName] ?? [];
-                if (!is_array($orderIds)) {
-                    $orderIds = [];
-                }
+                if (!is_array($orderIds)) $orderIds = [];
 
                 $posMap = [];
                 $iPos = 0;
@@ -526,9 +435,7 @@ $csrf = csrf_token();
                             $qCount = count($rawIds);
 
                             $time = (int)($t['time_limit_sec'] ?? 1200);
-                            if ($time <= 0) {
-                                $time = 1200;
-                            }
+                            if ($time <= 0) $time = 1200;
 
                             $mist = 10;
 
