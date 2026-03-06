@@ -641,18 +641,60 @@ if ($mode === 'exam' || $mode === 'exam_mix') {
             }
 
             if ($mode === 'trainer_mix' || $mode === 'trainer') {
-                $all = array_keys($qMap);
-                if (count($all) < 40) {
-                    quiz_abort('Недостатньо питань для тренажера', [
-                        'total_questions_available' => count($all),
-                        'need' => 40,
-                    ]);
+    $repeatMistakes = !empty($_POST['mistakes']);
+
+    if ($repeatMistakes) {
+        $mistakeIds = [];
+
+        try {
+            $pdo = db();
+
+            $st = $pdo->prepare("
+                SELECT DISTINCT question_id
+                FROM user_mistakes
+                WHERE user_id = :uid
+                ORDER BY created_at DESC
+            ");
+            $st->execute([':uid' => (string)$uid]);
+
+            $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+
+            foreach ($rows as $r) {
+                $qid = (int)($r['question_id'] ?? 0);
+                if ($qid > 0 && isset($qMap[$qid])) {
+                    $mistakeIds[] = $qid;
                 }
-                if ($seed === 0) $seed = 777;
-                $qIds = sample_ids($all, 40, $seed);
-                $topic = 'Змішаний тренажер';
             }
+
+            $mistakeIds = array_values(array_unique($mistakeIds));
+        } catch (Throwable $e) {
+            $mistakeIds = [];
         }
+
+        if (count($mistakeIds) < 1) {
+            quiz_abort('Немає помилок для повтору', [
+                'mode' => $mode,
+                'mistakes_only' => true,
+            ]);
+        }
+
+        if ($seed === 0) $seed = 777;
+        $qIds = sample_ids($mistakeIds, min(40, count($mistakeIds)), $seed);
+        $topic = 'Повтор помилок';
+    } else {
+        $all = array_keys($qMap);
+        if (count($all) < 40) {
+            quiz_abort('Недостатньо питань для тренажера', [
+                'total_questions_available' => count($all),
+                'need' => 40,
+            ]);
+        }
+
+        if ($seed === 0) $seed = 777;
+        $qIds = sample_ids($all, 40, $seed);
+        $topic = 'Змішаний тренажер';
+    }
+}
 
         if (!is_array($qIds) || count($qIds) < 1) {
             quiz_abort('Не вдалося сформувати список питань', [
@@ -669,17 +711,22 @@ if ($mode === 'exam' || $mode === 'exam_mix') {
     'test_id' => $testId,
     'title' => $title,
     'topic' => $topic,
+
     'time_limit' => $timeLimit,
     'time_limit_sec' => $timeLimit,
+
     'max_mistakes' => is_null($maxMistakes) ? null : (int)$maxMistakes,
     'mistakes_allowed' => isset($mistakesAllowed) ? (int)$mistakesAllowed : null,
+
     'started_at' => time(),
     'q_ids' => array_values($qIds),
     'idx' => 0,
     'total' => count($qIds),
+
     'answers' => [],
     'wrong_qids' => [],
     'mistakes' => 0,
+
     'seed' => $seed,
 ];
 
@@ -716,7 +763,6 @@ if ($mode === 'exam' || $mode === 'exam_mix') {
     if (!isset($quiz['wrong_qids']) || !is_array($quiz['wrong_qids'])) $quiz['wrong_qids'] = [];
     if (!isset($quiz['mistakes']) || !is_int($quiz['mistakes'])) $quiz['mistakes'] = 0;
 
-    // зберігаємо відповідь лише один раз на це питання
     if (!array_key_exists((string)$idx, $quiz['answers'])) {
         $quiz['answers'][(string)$idx] = [
             'qid' => $qid,
@@ -729,33 +775,27 @@ if ($mode === 'exam' || $mode === 'exam_mix') {
         $modeNow = (string)($quiz['mode'] ?? '');
         $isTrainerMode = (strpos($modeNow, 'trainer') === 0);
 
-        // якщо відповідь неправильна — одразу оновлюємо сесію
         if ($choice > 0 && !$isCorrect) {
             $quiz['wrong_qids'][] = $qid;
             $quiz['wrong_qids'] = array_values(array_unique(array_map('intval', $quiz['wrong_qids'])));
             $quiz['mistakes'] = count($quiz['wrong_qids']);
 
-            // запис у прогрес одразу, але НЕ для тренажера
-            if (!$isTrainerMode) {
-                $testIdNow = (int)($quiz['test_id'] ?? 0);
+            // ✅ пишемо в загальний bucket повтору помилок
+            progress_add_mistakes((string)$uid, 0, [$qid]);
 
-                // загальний bucket
-                progress_add_mistakes((string)$uid, 0, [(int)$qid]);
-
-                // bucket конкретного тесту
-                if ($testIdNow > 0) {
-                    progress_add_mistakes((string)$uid, $testIdNow, [(int)$qid]);
-                }
+            // ✅ окремо пишемо по тесту тільки для звичайних тестів
+            $testIdNow = (int)($quiz['test_id'] ?? 0);
+            if (!$isTrainerMode && $testIdNow > 0) {
+                progress_add_mistakes((string)$uid, $testIdNow, [$qid]);
             }
         } else {
-            // синхронізуємо число помилок навіть якщо відповідь правильна
-            $quiz['mistakes'] = count(array_values(array_unique(array_map('intval', $quiz['wrong_qids']))));
+            $quiz['mistakes'] = count($quiz['wrong_qids']);
         }
     }
 
     $_SESSION['quiz'] = $quiz;
 
-    $mistakes = (int)($quiz['mistakes'] ?? 0);
+    $mistakesNow = (int)($quiz['mistakes'] ?? 0);
     $modeNow = (string)($quiz['mode'] ?? '');
     $isTrainer = (strpos($modeNow, 'trainer') === 0);
 
@@ -764,13 +804,13 @@ if ($mode === 'exam' || $mode === 'exam_mix') {
         $allowed = is_null($allowed) ? null : (int)$allowed;
 
         if ($allowed !== null) {
-            // для іспиту: дозволено 2, на 3-й завершуємо
-            if ($mistakes > $allowed) {
+            // для іспиту: 2 помилки можна, на 3-й виліт
+            if ($mistakesNow > $allowed) {
                 quiz_redirect('/account/quiz.php?action=finish');
             }
         } else {
-            $maxMistakes = (int)($quiz['max_mistakes'] ?? 10);
-            if ($mistakes >= $maxMistakes) {
+            $maxMistakesNow = (int)($quiz['max_mistakes'] ?? 10);
+            if ($mistakesNow >= $maxMistakesNow) {
                 quiz_redirect('/account/quiz.php?action=finish');
             }
         }

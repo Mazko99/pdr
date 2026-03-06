@@ -5,9 +5,39 @@ if (session_status() !== PHP_SESSION_ACTIVE) {
   @session_start();
 }
 
-require_once __DIR__ . '/../../src/bootstrap.php';
+require_once __DIR__ . '/_guard.php';
 require_once __DIR__ . '/../../src/users_store.php';
-require_once __DIR__ . '/../src/progress_store.php';
+require_once __DIR__ . '/../../src/progress_store.php';
+require_once __DIR__ . '/../../src/db.php';
+
+$mistakes = !empty($_GET['mistakes']);
+$mistakeIds = [];
+
+if ($mistakes) {
+    try {
+        $pdo = db();
+        $uid = (string)auth_user_id();
+
+        $st = $pdo->prepare("
+            SELECT DISTINCT question_id
+            FROM user_mistakes
+            WHERE user_id = :uid
+            ORDER BY created_at DESC
+        ");
+        $st->execute([':uid' => $uid]);
+
+        $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+
+        foreach ($rows as $r) {
+            $qid = (int)($r['question_id'] ?? 0);
+            if ($qid > 0) $mistakeIds[] = $qid;
+        }
+
+        $mistakeIds = array_values(array_unique($mistakeIds));
+    } catch (Throwable $e) {
+        $mistakeIds = [];
+    }
+}
 
 // 1) Треба бути залогіненим
 if (!auth_user_id()) {
@@ -363,12 +393,13 @@ $csrf = csrf_token();
       </div>
       <div class="test-card__right">
         <form method="post" action="/account/quiz.php">
-          <input type="hidden" name="csrf" value="<?php echo h($csrf); ?>">
-          <input type="hidden" name="action" value="start">
-          <input type="hidden" name="mode" value="trainer_mix">
-          <input type="hidden" name="seed" value="<?php echo (int)random_int(1, 1000000000); ?>">
-          <button class="btn btn--primary" type="submit">Почати →</button>
-        </form>
+  <input type="hidden" name="csrf" value="<?php echo h($csrf); ?>">
+  <input type="hidden" name="action" value="start">
+  <input type="hidden" name="mode" value="trainer">
+  <input type="hidden" name="seed" value="<?php echo (int)random_int(1, 1000000000); ?>">
+  <input type="hidden" name="mistakes" value="<?php echo $mistakes ? '1' : '0'; ?>">
+  <button class="btn btn--primary" type="submit"><?php echo $mistakes ? 'Повторити помилки →' : 'Почати →'; ?></button>
+</form>
       </div>
     </div>
   </div>
