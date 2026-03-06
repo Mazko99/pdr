@@ -502,6 +502,31 @@ $csrf = csrf_token();
       }
   }
 
+<?php
+  $topicVal = $theoryDoneMap[$topicName] ?? null;
+
+  $topicSlug = function_exists('slugify_ua')
+      ? slugify_ua($topicName)
+      : mb_strtolower(trim((string)$topicName));
+
+  $slugVal = $theoryDoneMap[$topicSlug] ?? null;
+
+  $theoryDone = false;
+
+  if (is_bool($topicVal)) {
+      $theoryDone = $topicVal;
+  } elseif (is_array($topicVal)) {
+      $theoryDone = !empty($topicVal['done']);
+  }
+
+  if (!$theoryDone) {
+      if (is_bool($slugVal)) {
+          $theoryDone = $slugVal;
+      } elseif (is_array($slugVal)) {
+          $theoryDone = !empty($slugVal['done']);
+      }
+  }
+
   $orderIds = $topicTestIds[$topicName] ?? [];
   if (!is_array($orderIds)) $orderIds = [];
 
@@ -517,10 +542,12 @@ $csrf = csrf_token();
 ?>
 
       <div class="topic-block__actions" style="margin-top:10px;display:flex;gap:10px;flex-wrap:wrap;">
-        <a class="btn btn--ghost"
-   href="/account/theory.php?topic=<?php echo rawurlencode($topicName); ?>&go_test_id=<?php echo (int)($orderIds[0] ?? 0); ?>">
-   Теоретичний матеріал<?php echo $theoryDone ? ' ✅' : ''; ?>
-        </a>
+        <div class="topic-block__actions" style="margin-top:10px;display:flex;gap:10px;flex-wrap:wrap;">
+  <a class="btn btn--ghost"
+     href="/account/theory.php?topic=<?php echo rawurlencode($topicName); ?>&go_test_id=<?php echo (int)($orderIds[0] ?? 0); ?>">
+    Теоретичний матеріал<?php echo $theoryDone ? ' ✅' : ''; ?>
+  </a>
+       </div>
       </div>
 
       <div class="topic-tests">
