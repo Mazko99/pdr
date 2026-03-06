@@ -348,15 +348,28 @@ $csrf = csrf_token();
         </div>
       </div>
 
-      <div class="test-card__right">
+     <div class="test-card__right">
+  <?php if ($locked && !$theoryDone): ?>
+    <a class="btn btn--primary"
+       href="/account/theory.php?topic=<?php echo rawurlencode($topicName); ?>&go_test_id=<?php echo (int)($t['id'] ?? 0); ?>">
+      Спочатку відкрий теорію
+    </a>
+
+  <?php elseif ($locked): ?>
+    <button class="btn btn--primary" type="button" disabled aria-disabled="true" style="opacity:.55;cursor:not-allowed;">
+      <?php echo h($lockReason); ?>
+    </button>
+
+      <?php else: ?>
         <form method="post" action="/account/quiz.php">
-          <input type="hidden" name="csrf" value="<?php echo h($csrf); ?>">
-          <input type="hidden" name="action" value="start">
-          <input type="hidden" name="mode" value="exam">
-          <input type="hidden" name="seed" value="<?php echo (int)random_int(1, 1000000000); ?>">
-          <button class="btn btn--primary" type="submit">Почати →</button>
-        </form>
-      </div>
+         <input type="hidden" name="csrf" value="<?php echo h($csrf); ?>">
+         <input type="hidden" name="action" value="start">
+         <input type="hidden" name="mode" value="test">
+         <input type="hidden" name="test_id" value="<?php echo (int)($t['id'] ?? 0); ?>">
+         <button class="btn btn--primary" type="submit">Почати</button>
+       </form>
+      <?php endif; ?>
+     </div>
     </div>
   </div>
 
@@ -383,15 +396,27 @@ $csrf = csrf_token();
         </div>
       </div>
       <div class="test-card__right">
-        <form method="post" action="/account/quiz.php">
-  <input type="hidden" name="csrf" value="<?php echo h($csrf); ?>">
-  <input type="hidden" name="action" value="start">
-  <input type="hidden" name="mode" value="trainer">
-  <input type="hidden" name="seed" value="<?php echo (int)random_int(1, 1000000000); ?>">
-  <input type="hidden" name="mistakes" value="<?php echo $mistakes ? '1' : '0'; ?>">
-  <button class="btn btn--primary" type="submit"><?php echo $mistakes ? 'Повторити помилки →' : 'Почати →'; ?></button>
-</form>
-      </div>
+  <?php if ($locked && !$theoryDone): ?>
+    <a class="btn btn--primary"
+       href="/account/theory.php?topic=<?php echo rawurlencode($topicName); ?>&go_test_id=<?php echo (int)($t['id'] ?? 0); ?>">
+      Спочатку відкрий теорію
+    </a>
+
+  <?php elseif ($locked): ?>
+    <button class="btn btn--primary" type="button" disabled aria-disabled="true" style="opacity:.55;cursor:not-allowed;">
+      <?php echo h($lockReason); ?>
+    </button>
+
+  <?php else: ?>
+    <form method="post" action="/account/quiz.php">
+      <input type="hidden" name="csrf" value="<?php echo h($csrf); ?>">
+      <input type="hidden" name="action" value="start">
+      <input type="hidden" name="mode" value="test">
+      <input type="hidden" name="test_id" value="<?php echo (int)($t['id'] ?? 0); ?>">
+      <button class="btn btn--primary" type="submit">Почати</button>
+     </form>
+      <?php endif; ?>
+     </div>
     </div>
   </div>
 
@@ -463,8 +488,8 @@ $csrf = csrf_token();
 
       <div class="topic-block__actions" style="margin-top:10px;display:flex;gap:10px;flex-wrap:wrap;">
         <a class="btn btn--ghost"
-          href="/account/theory.php?topic=<?php echo rawurlencode($topicName); ?>">
-          Теоретичний матеріал<?php echo $theoryDone ? ' ✅' : ''; ?>
+   href="/account/theory.php?topic=<?php echo rawurlencode($topicName); ?>&go_test_id=<?php echo (int)($orderIds[0] ?? 0); ?>">
+   Теоретичний матеріал<?php echo $theoryDone ? ' ✅' : ''; ?>
         </a>
       </div>
 
