@@ -172,12 +172,7 @@ if ($uid !== '' && $topic !== '' && (string)($_GET['done'] ?? '') === '1') {
       user_progress_set($uid, $u);
   }
 
-  // 2) Перекидаємо в тест, якщо передано go_test_id
-  if ($goTestId > 0) {
-    redirect('/account/quiz.php?mode=test&test_id=' . $goTestId);
-} else {
-    redirect('/account/tests.php');
-}
+  if ($uid !== '' && $topic !== '' && (string)($_GET['done'] ?? '') === '1') 
 
 function theory_is_done(string $uid, string $topic): bool {
     // ✅ читаємо прогрес так само, як tests.php/quiz.php
