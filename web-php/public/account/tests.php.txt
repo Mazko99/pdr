@@ -478,13 +478,43 @@ $csrf = csrf_token();
       </div>
 
       <?php
-        $theoryDone = !empty($theoryDoneMap[$topicName]['done']);
-        $orderIds = $topicTestIds[$topicName] ?? [];
-        if (!is_array($orderIds)) $orderIds = [];
-        $posMap = [];
-        $iPos = 0;
-        foreach ($orderIds as $oid) { $oid = (int)$oid; if ($oid > 0) { $posMap[$oid] = $iPos; $iPos++; } }
-      ?>
+  $topicVal = $theoryDoneMap[$topicName] ?? null;
+
+  $topicSlug = function_exists('slugify_ua')
+      ? slugify_ua($topicName)
+      : strtolower(trim((string)$topicName));
+
+  $slugVal = $theoryDoneMap[$topicSlug] ?? null;
+
+  $theoryDone = false;
+
+  if (is_bool($topicVal)) {
+      $theoryDone = $topicVal;
+  } elseif (is_array($topicVal)) {
+      $theoryDone = !empty($topicVal['done']);
+  }
+
+  if (!$theoryDone) {
+      if (is_bool($slugVal)) {
+          $theoryDone = $slugVal;
+      } elseif (is_array($slugVal)) {
+          $theoryDone = !empty($slugVal['done']);
+      }
+  }
+
+  $orderIds = $topicTestIds[$topicName] ?? [];
+  if (!is_array($orderIds)) $orderIds = [];
+
+  $posMap = [];
+  $iPos = 0;
+  foreach ($orderIds as $oid) {
+      $oid = (int)$oid;
+      if ($oid > 0) {
+          $posMap[$oid] = $iPos;
+          $iPos++;
+      }
+  }
+?>
 
       <div class="topic-block__actions" style="margin-top:10px;display:flex;gap:10px;flex-wrap:wrap;">
         <a class="btn btn--ghost"
