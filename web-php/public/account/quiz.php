@@ -468,15 +468,30 @@ if (!function_exists('ppdr_slugify_ua')) {
 
 $topicSlug = $topic !== '' ? ppdr_slugify_ua($topic) : '';
 
-$theoryOk =
-  (!empty($theoryDoneMap[$topic]['done'])) ||
-  ($topicSlug !== '' && !empty($theoryDoneMap[$topicSlug]['done']));
+$topicVal = $theoryDoneMap[$topic] ?? null;
+$slugVal  = $topicSlug !== '' ? ($theoryDoneMap[$topicSlug] ?? null) : null;
+
+$topicDone = false;
+if (is_bool($topicVal)) {
+    $topicDone = $topicVal;
+} elseif (is_array($topicVal)) {
+    $topicDone = !empty($topicVal['done']);
+}
+
+$slugDone = false;
+if (is_bool($slugVal)) {
+    $slugDone = $slugVal;
+} elseif (is_array($slugVal)) {
+    $slugDone = !empty($slugVal['done']);
+}
+
+$theoryOk = $topicDone || $slugDone;
 
 if (!$theoryOk) {
-  quiz_abort('Спочатку ознайомся з теорією по темі', [
-    'topic' => $topic,
-    'theory_url' => '/account/theory.php?topic=' . rawurlencode($topic),
-  ]);
+    quiz_abort('Спочатку ознайомся з теорією по темі', [
+        'topic' => $topic,
+        'theory_url' => '/account/theory.php?topic=' . rawurlencode($topic),
+    ]);
 }
             if (!$theoryOk) {
                 quiz_abort('Спочатку ознайомся з теорією по темі', [
@@ -654,17 +669,11 @@ if ($mode === 'exam' || $mode === 'exam_mix') {
     'test_id' => $testId,
     'title' => $title,
     'topic' => $topic,
-
-    // ✅ важливо: у тебе далі по коду місцями читається time_limit_sec
     'time_limit' => $timeLimit,
     'time_limit_sec' => $timeLimit,
-
-    // старе поле лишаємо, але новий іспит буде дивитись на mistakes_allowed
     'max_mistakes' => is_null($maxMistakes) ? null : (int)$maxMistakes,
-
-    // ✅ нове: дозволені помилки (2), завершення на 3-й (тобто коли mistakes > 2)
     'mistakes_allowed' => isset($mistakesAllowed) ? (int)$mistakesAllowed : null,
-
+    'mistakes' => 0,
     'started_at' => time(),
     'q_ids' => array_values($qIds),
     'idx' => 0,
@@ -1170,37 +1179,34 @@ $topic = (string)($quiz['topic'] ?? '');
                     <?php $isTrainerMode = strpos((string)$quiz['mode'], 'trainer') === 0; ?>
 
 <?php
-// ----------------- SAFETY DEFAULTS (fix undefined) -----------------
 if (!isset($mistakes) || !is_int($mistakes)) {
-  // пробуємо взяти з сесії, якщо вже рахується
-  $mistakes = (int)($_SESSION['quiz']['mistakes'] ?? 0);
+    $mistakes = (int)($_SESSION['quiz']['mistakes'] ?? 0);
 }
 
 if (!isset($maxMistakes) || !is_int($maxMistakes)) {
-  // режим може бути test / exam / trainer
-  $modeSafe = (string)($mode ?? ($_GET['mode'] ?? ($_SESSION['quiz']['mode'] ?? 'test')));
+    $modeSafe = (string)($mode ?? ($_GET['mode'] ?? ($_SESSION['quiz']['mode'] ?? 'test')));
+    $maxMistakes = (int)($_SESSION['quiz']['max_mistakes'] ?? 0);
 
-  // 0 = без ліміту (для trainer часто так)
-  $maxMistakes = (int)($_SESSION['quiz']['max_mistakes'] ?? 0);
-
-  // якщо в сесії ще нема — виставляємо дефолти по режимах
-  if ($maxMistakes <= 0) {
-    if ($modeSafe === 'exam') $maxMistakes = 2;      // іспит: 2 помилки
-    elseif ($modeSafe === 'test') $maxMistakes = 10; // тест: 10 помилок
-    else $maxMistakes = 0;                           // trainer: без ліміту
-  }
+    if ($maxMistakes <= 0) {
+        if ($modeSafe === 'exam') {
+            $maxMistakes = 2;
+        } elseif ($modeSafe === 'test') {
+            $maxMistakes = 10;
+        } else {
+            $maxMistakes = 0;
+        }
+    }
 }
-// -------------------------------------------------------------------
 ?>
+
 <div class="pp-pill">
-  <small>Помилки</small>
+    <small>Помилки</small>
 
-  <?php if ($isTrainerMode): ?>
-      <span id="mistakesNow"><?= (int)$mistakes ?></span>
-  <?php else: ?>
-      <span id="mistakesNow"><?= (int)$mistakes ?></span>/<span><?= (int)$maxMistakes ?></span>
-  <?php endif; ?>
-
+    <?php if ($isTrainerMode): ?>
+        <span id="mistakesNow"><?= (int)$mistakes ?></span>
+    <?php else: ?>
+        <span id="mistakesNow"><?= (int)$mistakes ?></span>/<span><?= (int)$maxMistakes ?></span>
+    <?php endif; ?>
 </div>
 
                     <?php if ($timeLimit > 0): ?>
