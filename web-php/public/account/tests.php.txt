@@ -1,14 +1,31 @@
 <?php
 declare(strict_types=1);
 
-if (session_status() !== PHP_SESSION_ACTIVE) {
-  @session_start();
-}
-
-require_once __DIR__ . '/_guard.php';
+require_once __DIR__ . '/../../src/bootstrap.php';
 require_once __DIR__ . '/../../src/users_store.php';
 require_once __DIR__ . '/../../src/progress_store.php';
 require_once __DIR__ . '/../../src/db.php';
+
+if (session_status() !== PHP_SESSION_ACTIVE) {
+    @session_start();
+}
+
+// 1) Треба бути залогіненим
+if (!auth_user_id()) {
+    redirect('/login');
+}
+
+// 2) Підтягнути актуальний доступ/план
+auth_refresh_access();
+
+// 3) Перевірка політики "1 активний пристрій"
+auth_enforce_device_policy();
+
+$uid = (string)auth_user_id();
+if ($uid === '') {
+    header('Location: /login', true, 302);
+    exit;
+}
 
 $mistakes = !empty($_GET['mistakes']);
 $mistakeIds = [];
@@ -16,7 +33,6 @@ $mistakeIds = [];
 if ($mistakes) {
     try {
         $pdo = db();
-        $uid = (string)auth_user_id();
 
         $st = $pdo->prepare("
             SELECT DISTINCT question_id
@@ -39,51 +55,26 @@ if ($mistakes) {
     }
 }
 
-// 1) Треба бути залогіненим
-if (!auth_user_id()) {
-  redirect('/login');
-}
-
-// 2) Підтягнути актуальний доступ/план (опційно, але бажано)
-auth_refresh_access();
-
-// 3) Перевірка політики "1 активний пристрій"
-auth_enforce_device_policy();
-
-$uid = auth_user_id();
-if (!$uid) {
-  header('Location: /login', true, 302);
-  exit;
-}
-$uid = auth_user_id();
-if (!$uid) {
-  header('Location: /login', true, 302);
-  exit;
-}
-
 /**
- * ✅ Доступ рахуємо по users.json (plan + expires_at),
- * і синхронізуємо $_SESSION['has_access'].
+ * ✅ Доступ рахуємо по users.json / users_store
  */
 function ppdr_user_has_access(?array $u): bool {
-  if (!is_array($u)) return false;
+    if (!is_array($u)) return false;
 
-  $plan = strtolower(trim((string)($u['plan'] ?? 'free')));
-  if ($plan === '' || $plan === 'free') return false;
+    $plan = strtolower(trim((string)($u['plan'] ?? 'free')));
+    if ($plan === '' || $plan === 'free') return false;
 
-  // які плани вважаємо платними/активними
-  $paidPlans = ['basic','mini12','dev','admin','base','12d'];
-  if (!in_array($plan, $paidPlans, true)) return false;
+    $paidPlans = ['basic','mini12','dev','admin','base','12d'];
+    if (!in_array($plan, $paidPlans, true)) return false;
 
-  $exp = trim((string)($u['expires_at'] ?? ''));
-  if ($exp === '') return true; // якщо без дати — вважаємо активним
+    $exp = trim((string)($u['expires_at'] ?? ''));
+    if ($exp === '') return true;
 
-  $ts = strtotime($exp);
-  if ($ts === false) return true; // якщо дата крива — не блокуємо
+    $ts = strtotime($exp);
+    if ($ts === false) return true;
 
-  return $ts > time();
+    return $ts > time();
 }
-
 // ✅ беремо актуального юзера зі storage
 $userNow = function_exists('user_find_by_id') ? user_find_by_id((string)$uid) : null;
 
