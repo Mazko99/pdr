@@ -143,6 +143,7 @@ function user_progress_set(string $uid, array $u): void {
 
 /** -------------------- Topic input -------------------- */
 $topic = trim((string)($_GET['topic'] ?? ''));
+$goTestId = (int)($_GET['go_test_id'] ?? 0);
 
 // ✅ натиснули "Перейти до тестування" => підтверджуємо теорію
 if ($uid !== '' && $topic !== '' && (string)($_GET['done'] ?? '') === '1') {
@@ -172,12 +173,10 @@ if ($uid !== '' && $topic !== '' && (string)($_GET['done'] ?? '') === '1') {
   }
 
   // 2) Перекидаємо в тест, якщо передано go_test_id
-  $goTestId = (int)($_GET['go_test_id'] ?? 0);
   if ($goTestId > 0) {
     redirect('/account/quiz.php?mode=test&test_id=' . $goTestId);
-  } else {
+} else {
     redirect('/account/tests.php');
-  }
 }
 
 function theory_is_done(string $uid, string $topic): bool {

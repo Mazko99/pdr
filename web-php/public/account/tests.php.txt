@@ -462,7 +462,7 @@ $csrf = csrf_token();
       ?>
 
       <div class="topic-block__actions" style="margin-top:10px;display:flex;gap:10px;flex-wrap:wrap;">
-        <a class="btn btn--ghost" href="/account/theory.php?topic=<?php echo urlencode($topicName); ?>">
+        <a class="btn btn--ghost" href="/account/theory.php?topic=<?php echo rawurlencode($topic); ?>&go_test_id=<?php echo (int)$testId; ?>"
           Теоретичний матеріал<?php echo $theoryDone ? ' ✅' : ''; ?>
         </a>
       </div>
