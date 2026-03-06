@@ -640,61 +640,62 @@ if ($mode === 'exam' || $mode === 'exam_mix') {
                 $topic = $topicReq;
             }
 
-            if ($mode === 'trainer_mix' || $mode === 'trainer') {
-    $repeatMistakes = !empty($_POST['mistakes']);
+                        if ($mode === 'trainer_mix' || $mode === 'trainer') {
+                $repeatMistakes = !empty($_POST['mistakes']);
 
-    if ($repeatMistakes) {
-        $mistakeIds = [];
+                if ($repeatMistakes) {
+                    $mistakeIds = [];
 
-        try {
-            $pdo = db();
+                    try {
+                        $pdo = db();
 
-            $st = $pdo->prepare("
-                SELECT DISTINCT question_id
-                FROM user_mistakes
-                WHERE user_id = :uid
-                ORDER BY created_at DESC
-            ");
-            $st->execute([':uid' => (string)$uid]);
+                        $st = $pdo->prepare("
+                            SELECT DISTINCT question_id
+                            FROM user_mistakes
+                            WHERE user_id = :uid
+                            ORDER BY created_at DESC
+                        ");
+                        $st->execute([':uid' => (string)$uid]);
 
-            $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+                        $rows = $st->fetchAll(PDO::FETCH_ASSOC);
 
-            foreach ($rows as $r) {
-                $qid = (int)($r['question_id'] ?? 0);
-                if ($qid > 0 && isset($qMap[$qid])) {
-                    $mistakeIds[] = $qid;
+                        foreach ($rows as $r) {
+                            $qid = (int)($r['question_id'] ?? 0);
+                            if ($qid > 0 && isset($qMap[$qid])) {
+                                $mistakeIds[] = $qid;
+                            }
+                        }
+
+                        $mistakeIds = array_values(array_unique($mistakeIds));
+                    } catch (Throwable $e) {
+                        $mistakeIds = [];
+                    }
+
+                    if (count($mistakeIds) < 1) {
+                        quiz_abort('Немає помилок для повтору', [
+                            'mode' => $mode,
+                            'mistakes_only' => true,
+                        ]);
+                    }
+
+                    if ($seed === 0) $seed = 777;
+                    $qIds = sample_ids($mistakeIds, min(40, count($mistakeIds)), $seed);
+                    $topic = 'Повтор помилок';
+                } else {
+                    $all = array_keys($qMap);
+                    if (count($all) < 40) {
+                        quiz_abort('Недостатньо питань для тренажера', [
+                            'total_questions_available' => count($all),
+                            'need' => 40,
+                        ]);
+                    }
+
+                    if ($seed === 0) $seed = 777;
+                    $qIds = sample_ids($all, 40, $seed);
+                    $topic = 'Змішаний тренажер';
                 }
             }
-
-            $mistakeIds = array_values(array_unique($mistakeIds));
-        } catch (Throwable $e) {
-            $mistakeIds = [];
         }
-
-        if (count($mistakeIds) < 1) {
-            quiz_abort('Немає помилок для повтору', [
-                'mode' => $mode,
-                'mistakes_only' => true,
-            ]);
-        }
-
-        if ($seed === 0) $seed = 777;
-        $qIds = sample_ids($mistakeIds, min(40, count($mistakeIds)), $seed);
-        $topic = 'Повтор помилок';
-    } else {
-        $all = array_keys($qMap);
-        if (count($all) < 40) {
-            quiz_abort('Недостатньо питань для тренажера', [
-                'total_questions_available' => count($all),
-                'need' => 40,
-            ]);
-        }
-
-        if ($seed === 0) $seed = 777;
-        $qIds = sample_ids($all, 40, $seed);
-        $topic = 'Змішаний тренажер';
-    }
-}
 
         if (!is_array($qIds) || count($qIds) < 1) {
             quiz_abort('Не вдалося сформувати список питань', [
