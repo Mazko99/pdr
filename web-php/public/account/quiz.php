@@ -731,7 +731,7 @@ if ($mode === 'exam' || $mode === 'exam_mix') {
 ];
 
         quiz_redirect('/account/quiz.php');
-    }
+        }
 // ДАЛІ ТВОЯ ОРИГІНАЛЬНА HTML/RENDER-ЧАСТИНА ФАЙЛУ БЕЗ УРІЗОК
 
     if ($action === 'answer') {
