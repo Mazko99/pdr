@@ -669,17 +669,22 @@ if ($mode === 'exam' || $mode === 'exam_mix') {
     'test_id' => $testId,
     'title' => $title,
     'topic' => $topic,
+
     'time_limit' => $timeLimit,
     'time_limit_sec' => $timeLimit,
+
     'max_mistakes' => is_null($maxMistakes) ? null : (int)$maxMistakes,
     'mistakes_allowed' => isset($mistakesAllowed) ? (int)$mistakesAllowed : null,
-    'mistakes' => 0,
+
     'started_at' => time(),
     'q_ids' => array_values($qIds),
     'idx' => 0,
     'total' => count($qIds),
+
     'answers' => [],
     'wrong_qids' => [],
+    'mistakes' => 0,
+
     'seed' => $seed,
 ];
 
@@ -688,115 +693,101 @@ if ($mode === 'exam' || $mode === 'exam_mix') {
 // ДАЛІ ТВОЯ ОРИГІНАЛЬНА HTML/RENDER-ЧАСТИНА ФАЙЛУ БЕЗ УРІЗОК
 
     if ($action === 'answer') {
-        if (!isset($_SESSION['quiz']) || !is_array($_SESSION['quiz']) || !quiz_session_is_valid($_SESSION['quiz'])) {
-            quiz_redirect('/account/tests.php');
-        }
+    if (!isset($_SESSION['quiz']) || !is_array($_SESSION['quiz']) || !quiz_session_is_valid($_SESSION['quiz'])) {
+        quiz_redirect('/account/tests.php');
+    }
 
-        $quiz = $_SESSION['quiz'];
+    $quiz = $_SESSION['quiz'];
 
-        $choice = (int)($_POST['choice'] ?? 0);
-        $idx = (int)($quiz['idx'] ?? 0);
-        $qIds = $quiz['q_ids'] ?? [];
-        $total = (int)($quiz['total'] ?? 0);
+    $choice = (int)($_POST['choice'] ?? 0);
+    $idx = (int)($quiz['idx'] ?? 0);
+    $qIds = $quiz['q_ids'] ?? [];
+    $total = (int)($quiz['total'] ?? 0);
 
-        if (!is_array($qIds) || $idx < 0 || $idx >= $total) {
-            quiz_redirect('/account/quiz.php?action=finish');
-        }
+    if (!is_array($qIds) || $idx < 0 || $idx >= $total) {
+        quiz_redirect('/account/quiz.php?action=finish');
+    }
 
-        $qid = (int)$qIds[$idx];
-        $q = $qMap[$qid] ?? null;
-        if (!is_array($q)) {
-            quiz_abort('Питання не знайдено', ['qid' => $qid, 'idx' => $idx]);
-        }
+    $qid = (int)$qIds[$idx];
+    $q = $qMap[$qid] ?? null;
+    if (!is_array($q)) {
+        quiz_abort('Питання не знайдено', ['qid' => $qid, 'idx' => $idx]);
+    }
 
-        $correct = (int)$q['correct'];
-        $isCorrect = ($choice === $correct);
-        
-                // ✅ NEW: запис помилки одразу (Railway sessions можуть “злітати”, і finish не завжди спрацює)
+    $correct = (int)$q['correct'];
+    $isCorrect = ($choice === $correct);
+
+    if (!isset($quiz['answers']) || !is_array($quiz['answers'])) $quiz['answers'] = [];
+    if (!isset($quiz['wrong_qids']) || !is_array($quiz['wrong_qids'])) $quiz['wrong_qids'] = [];
+    if (!isset($quiz['mistakes']) || !is_int($quiz['mistakes'])) $quiz['mistakes'] = 0;
+
+    // зберігаємо відповідь лише один раз на це питання
+    if (!array_key_exists((string)$idx, $quiz['answers'])) {
+        $quiz['answers'][(string)$idx] = [
+            'qid' => $qid,
+            'choice' => $choice,
+            'correct' => $correct,
+            'is_correct' => $isCorrect,
+            'at' => time(),
+        ];
+
         $modeNow = (string)($quiz['mode'] ?? '');
         $isTrainerMode = (strpos($modeNow, 'trainer') === 0);
 
-        if (!$isTrainerMode && $choice > 0 && !$isCorrect) {
-            $testIdNow = (int)($quiz['test_id'] ?? 0);
+        // якщо відповідь неправильна — одразу оновлюємо сесію
+        if ($choice > 0 && !$isCorrect) {
+            $quiz['wrong_qids'][] = $qid;
+            $quiz['wrong_qids'] = array_values(array_unique(array_map('intval', $quiz['wrong_qids'])));
+            $quiz['mistakes'] = count($quiz['wrong_qids']);
 
-            // пишемо або в конкретний тест, або в bucket 0 (для екзамену/міксів)
-            $bucket = $testIdNow > 0 ? $testIdNow : 0;
+            // запис у прогрес одразу, але НЕ для тренажера
+            if (!$isTrainerMode) {
+                $testIdNow = (int)($quiz['test_id'] ?? 0);
 
-            progress_add_mistakes((string)$uid, $bucket, [(int)$qid]);
-        }
+                // загальний bucket
+                progress_add_mistakes((string)$uid, 0, [(int)$qid]);
 
-        if (!isset($quiz['answers']) || !is_array($quiz['answers'])) $quiz['answers'] = [];
-
-        // Save answer once
-        if (!array_key_exists((string)$idx, $quiz['answers'])) {
-            $quiz['answers'][(string)$idx] = [
-                'qid' => $qid,
-                'choice' => $choice,
-                'correct' => $correct,
-                'is_correct' => $isCorrect,
-                'at' => time(),
-            ];
-        }
-
-        // ✅ DO NOT auto-next (stay on same idx to show explain)
-        $_SESSION['quiz'] = $quiz;
-
-        // ✅ auto finish on mistakes limit (exam/test)
-        // ✅ auto finish on mistakes limit (ONLY for exam/test, NOT for trainer)
-$mistakes = quiz_count_mistakes($quiz);
-
-$modeNow = (string)($quiz['mode'] ?? '');
-$isTrainer = (strpos($modeNow, 'trainer') === 0);
-
-if (!$isTrainer) {
-    $allowed = $quiz['mistakes_allowed'] ?? null;
-    $allowed = is_null($allowed) ? null : (int)$allowed;
-
-    if ($allowed !== null) {
-        // на 3-й помилці завершуємо => коли mistakes > allowed (для allowed=2)
-        if ($mistakes > $allowed) {
-            quiz_redirect('/account/quiz.php?action=finish');
-        }
-    } else {
-        // fallback старої логіки
-        $modeNow = (string)($quiz['mode'] ?? '');
-        $isTrainer = (strpos($modeNow, 'trainer') === 0);
-
-        $maxMistakes = (int)($quiz['max_mistakes'] ?? ($isTrainer ? 999999 : 3));
-        if ($mistakes >= $maxMistakes) {
-            quiz_redirect('/account/quiz.php?action=finish');
+                // bucket конкретного тесту
+                if ($testIdNow > 0) {
+                    progress_add_mistakes((string)$uid, $testIdNow, [(int)$qid]);
+                }
+            }
+        } else {
+            // синхронізуємо число помилок навіть якщо відповідь правильна
+            $quiz['mistakes'] = count(array_values(array_unique(array_map('intval', $quiz['wrong_qids']))));
         }
     }
-}
 
-// ✅ Якщо задано mistakes_allowed — працюємо по ньому (2 помилки допустимо)
-$allowed = $quiz['mistakes_allowed'] ?? null;
-$allowed = is_null($allowed) ? null : (int)$allowed;
+    $_SESSION['quiz'] = $quiz;
 
-if ($allowed !== null) {
-    // на 3-й помилці завершуємо => коли mistakes > 2
-    if ($mistakes > $allowed) {
-        quiz_redirect('/account/quiz.php?action=finish');
-    }
-} else {
-    // fallback старої логіки
+    $mistakes = (int)($quiz['mistakes'] ?? 0);
     $modeNow = (string)($quiz['mode'] ?? '');
     $isTrainer = (strpos($modeNow, 'trainer') === 0);
 
-    $maxMistakes = (int)($quiz['max_mistakes'] ?? ($isTrainer ? 999999 : 3));
-    if ($mistakes >= $maxMistakes) {
+    if (!$isTrainer) {
+        $allowed = $quiz['mistakes_allowed'] ?? null;
+        $allowed = is_null($allowed) ? null : (int)$allowed;
+
+        if ($allowed !== null) {
+            // для іспиту: дозволено 2, на 3-й завершуємо
+            if ($mistakes > $allowed) {
+                quiz_redirect('/account/quiz.php?action=finish');
+            }
+        } else {
+            $maxMistakes = (int)($quiz['max_mistakes'] ?? 10);
+            if ($mistakes >= $maxMistakes) {
+                quiz_redirect('/account/quiz.php?action=finish');
+            }
+        }
+    }
+
+    $answered = is_array($quiz['answers']) ? count($quiz['answers']) : 0;
+    if ($answered >= $total) {
         quiz_redirect('/account/quiz.php?action=finish');
     }
+
+    quiz_redirect('/account/quiz.php');
 }
-
-        // ✅ if all answered -> finish
-        $answered = is_array($quiz['answers']) ? count($quiz['answers']) : 0;
-        if ($answered >= $total) {
-            quiz_redirect('/account/quiz.php?action=finish');
-        }
-
-        quiz_redirect('/account/quiz.php');
-    }
 
     if ($action === 'go') {
         if (!isset($_SESSION['quiz']) || !is_array($_SESSION['quiz']) || !quiz_session_is_valid($_SESSION['quiz'])) {
@@ -1184,16 +1175,16 @@ if (!isset($mistakes) || !is_int($mistakes)) {
 }
 
 if (!isset($maxMistakes) || !is_int($maxMistakes)) {
-    $modeSafe = (string)($mode ?? ($_GET['mode'] ?? ($_SESSION['quiz']['mode'] ?? 'test')));
+    $modeSafe = (string)($_SESSION['quiz']['mode'] ?? 'test');
     $maxMistakes = (int)($_SESSION['quiz']['max_mistakes'] ?? 0);
 
     if ($maxMistakes <= 0) {
-        if ($modeSafe === 'exam') {
+        if ($modeSafe === 'exam' || $modeSafe === 'exam_mix') {
             $maxMistakes = 2;
-        } elseif ($modeSafe === 'test') {
-            $maxMistakes = 10;
-        } else {
+        } elseif (strpos($modeSafe, 'trainer') === 0) {
             $maxMistakes = 0;
+        } else {
+            $maxMistakes = 10;
         }
     }
 }
