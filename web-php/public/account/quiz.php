@@ -1169,6 +1169,7 @@ $topic = (string)($quiz['topic'] ?? '');
                     <div class="pp-pill"><small>Питання</small> <span><?= (int)($idx+1) ?></span>/<span><?= (int)$total ?></span></div>
                     <?php $isTrainerMode = strpos((string)$quiz['mode'], 'trainer') === 0; ?>
 
+<?php
 // ----------------- SAFETY DEFAULTS (fix undefined) -----------------
 if (!isset($mistakes) || !is_int($mistakes)) {
   // пробуємо взяти з сесії, якщо вже рахується
@@ -1184,12 +1185,13 @@ if (!isset($maxMistakes) || !is_int($maxMistakes)) {
 
   // якщо в сесії ще нема — виставляємо дефолти по режимах
   if ($maxMistakes <= 0) {
-    if ($modeSafe === 'exam') $maxMistakes = 2;      // як ти просив для іспиту
-    elseif ($modeSafe === 'test') $maxMistakes = 10; // стандарт на тест
+    if ($modeSafe === 'exam') $maxMistakes = 2;      // іспит: 2 помилки
+    elseif ($modeSafe === 'test') $maxMistakes = 10; // тест: 10 помилок
     else $maxMistakes = 0;                           // trainer: без ліміту
   }
 }
 // -------------------------------------------------------------------
+?>
 <div class="pp-pill">
   <small>Помилки</small>
 

@@ -60,24 +60,6 @@ if (!function_exists('csrf_verify')) {
 // ✅ ЄДИНИЙ правильний UID для прогресу — той, що повертає auth_user_id()
 $uid = (string)auth_user_id();
 if (trim($uid) === '') {
-  redirect('/login');
-}
-
-    // As last resort: if you store email only, use email as key
-    $emailCandidates = [
-        $_SESSION['user']['email'] ?? null,
-        $_SESSION['email'] ?? null,
-        $_SESSION['auth']['email'] ?? null,
-    ];
-    foreach ($emailCandidates as $e) {
-        if (is_string($e) && trim($e) !== '') return 'email:' . trim($e);
-    }
-
-    return '';
-}
-
-$uid = detect_uid_from_session();
-if ($uid === '') {
     redirect('/login');
 }
 
@@ -245,15 +227,6 @@ function theory_mark_done(string $uid, string $topic): void {
         return;
     }
 
-    // fallback старий JSON
-    $u = user_progress_get($uid);
-    if (!isset($u['theory_done']) || !is_array($u['theory_done'])) $u['theory_done'] = [];
-
-    if ($topicKey !== '') $u['theory_done'][$topicKey] = true;
-    if ($slugKey !== '')  $u['theory_done'][$slugKey]  = true;
-
-    user_progress_set($uid, $u);
-}
 
     // fallback старий JSON
     $u = user_progress_get($uid);
