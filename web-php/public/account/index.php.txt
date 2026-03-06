@@ -119,32 +119,51 @@ $subscription = [
 
 // (опційно) якщо тобі треба окремо в шаблоні
 // $subscriptionActive = $isActive;
-// ---- progress_store (помилки + пройдені тести) ----
-$uProgress = progress_user_get($uidStr);
-if (!is_array($uProgress)) $uProgress = [];
-
-$passedTestsMap = $uProgress['passed_tests'] ?? [];
-if (!is_array($passedTestsMap)) $passedTestsMap = [];
-
+// ---- progress from Postgres directly (100% source of truth) ----
 $passedTestIds = [];
-foreach ($passedTestsMap as $k => $v) {
-  if ($v) $passedTestIds[] = (int)$k;
-}
-$passedTestIds = array_values(array_filter($passedTestIds, fn($x) => $x > 0));
-
-$mistakesByTest = $uProgress['mistakes'] ?? [];
-if (!is_array($mistakesByTest)) $mistakesByTest = [];
-
 $mistakeSet = [];
-foreach ($mistakesByTest as $bucket => $list) {
-  if (!is_array($list)) continue;
-  foreach ($list as $qid) {
-    $qid = (int)$qid;
-    if ($qid > 0) $mistakeSet[$qid] = true;
-  }
-}
-$mistakesCount = count($mistakeSet);
+$mistakesCount = 0;
 
+try {
+  if (function_exists('db')) {
+    $pdo = db();
+
+    // 1) Пройдені тести
+    $st = $pdo->prepare("
+      SELECT test_id
+      FROM user_passed_tests
+      WHERE user_id = :uid
+    ");
+    $st->execute([':uid' => $uidStr]);
+
+    $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+    foreach ($rows as $r) {
+      $tid = (int)($r['test_id'] ?? 0);
+      if ($tid > 0) $passedTestIds[] = $tid;
+    }
+    $passedTestIds = array_values(array_unique($passedTestIds));
+
+    // 2) Унікальні помилки по всіх bucket
+    $st = $pdo->prepare("
+      SELECT DISTINCT question_id
+      FROM user_mistakes
+      WHERE user_id = :uid
+    ");
+    $st->execute([':uid' => $uidStr]);
+
+    $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+    foreach ($rows as $r) {
+      $qid = (int)($r['question_id'] ?? 0);
+      if ($qid > 0) $mistakeSet[$qid] = true;
+    }
+
+    $mistakesCount = count($mistakeSet);
+  }
+} catch (Throwable $e) {
+  $passedTestIds = [];
+  $mistakeSet = [];
+  $mistakesCount = 0;
+}
 // ---- Read exports for progress ----
 $dataDir = realpath(__DIR__ . '/../data');
 $questionsExport = $dataDir ? ($dataDir . '/questions_export.json') : '';
