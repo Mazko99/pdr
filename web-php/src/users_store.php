@@ -3,484 +3,347 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/db.php';
 
-if (!function_exists('progress_debug_log')) {
-    function progress_debug_log(string $label, array $data = []): void
-    {
-        try {
-            $dir = dirname(__DIR__) . '/storage';
-            if (!is_dir($dir)) {
-                @mkdir($dir, 0777, true);
-            }
+/**
+ * users_store.php (Postgres)
+ *
+ * API сумісний з твоїм кодом:
+ * - users_all()
+ * - user_find_by_id()
+ * - user_find_by_email()
+ * - user_create()
+ * - user_verify_password()
+ * - user_upsert()
+ *
+ * + OAuth helpers:
+ * - oauth_find()
+ * - oauth_user_id_by_provider_sub()
+ * - oauth_link()
+ */
 
-            $file = $dir . '/progress_debug.log';
-
-            $line = '[' . date('Y-m-d H:i:s') . '] ' . $label;
-
-            if (!empty($data)) {
-                $json = json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-                if ($json !== false) {
-                    $line .= ' ' . $json;
-                }
-            }
-
-            $line .= PHP_EOL;
-            @file_put_contents($file, $line, FILE_APPEND);
-        } catch (Throwable $e) {
-            // debug log must never break app
-        }
-    }
+function dbi(): PDO {
+  $pdo = db();
+  ensure_schema($pdo);
+  return $pdo;
 }
 
-if (!function_exists('progress_db')) {
-    function progress_db(): PDO
-    {
-        static $pdo = null;
-        if ($pdo instanceof PDO) {
-            return $pdo;
-        }
+function ensure_schema(PDO $pdo): void {
+  // users table
+  $pdo->exec("
+    CREATE TABLE IF NOT EXISTS users (
+      id            TEXT PRIMARY KEY,
+      email         VARCHAR(190) UNIQUE,
+      name          VARCHAR(190),
+      password_hash VARCHAR(255),
+      plan          VARCHAR(32) NOT NULL DEFAULT 'free',
+      expires_at    TIMESTAMPTZ NULL,
+      paid_at       TIMESTAMPTZ NULL,
+      created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      meta          JSONB NOT NULL DEFAULT '{}'::jsonb
+    );
+  ");
 
-        $pdo = db();
-        progress_ensure_schema($pdo);
+  // oauth links table
+  $pdo->exec("
+    CREATE TABLE IF NOT EXISTS oauth_links (
+      provider   VARCHAR(32) NOT NULL,
+      sub        VARCHAR(255) NOT NULL,
+      user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      email      VARCHAR(190),
+      name       VARCHAR(190),
+      linked_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (provider, sub)
+    );
+  ");
 
-        return $pdo;
-    }
+  $pdo->exec("CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);");
+  $pdo->exec("CREATE INDEX IF NOT EXISTS idx_users_created ON users(created_at);");
+  $pdo->exec("CREATE INDEX IF NOT EXISTS idx_oauth_user_id ON oauth_links(user_id);");
+
+  // Якщо users колись створився без нових колонок — докрутимо
+  $pdo->exec("ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash VARCHAR(255);");
+  $pdo->exec("ALTER TABLE users ADD COLUMN IF NOT EXISTS meta JSONB NOT NULL DEFAULT '{}'::jsonb;");
+  $pdo->exec("ALTER TABLE users ADD COLUMN IF NOT EXISTS plan VARCHAR(32) NOT NULL DEFAULT 'free';");
+  $pdo->exec("ALTER TABLE users ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ NULL;");
+  $pdo->exec("ALTER TABLE users ADD COLUMN IF NOT EXISTS paid_at TIMESTAMPTZ NULL;");
 }
 
-if (!function_exists('progress_ensure_schema')) {
-    function progress_ensure_schema(PDO $pdo): void
-    {
-        $pdo->exec("
-            CREATE TABLE IF NOT EXISTS user_passed_tests (
-                user_id   TEXT NOT NULL,
-                test_id   INTEGER NOT NULL,
-                passed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                PRIMARY KEY (user_id, test_id)
-            );
-        ");
-
-        $pdo->exec("
-            CREATE TABLE IF NOT EXISTS user_test_mistakes (
-                id          BIGSERIAL PRIMARY KEY,
-                user_id     TEXT NOT NULL,
-                test_id     INTEGER NOT NULL DEFAULT 0,
-                question_id INTEGER NOT NULL,
-                created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
-            );
-        ");
-
-        $pdo->exec("
-            CREATE TABLE IF NOT EXISTS user_mistakes (
-                id          BIGSERIAL PRIMARY KEY,
-                user_id     TEXT NOT NULL,
-                test_bucket INTEGER NOT NULL DEFAULT 0,
-                question_id INTEGER NOT NULL,
-                created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
-            );
-        ");
-
-        $pdo->exec("
-            CREATE TABLE IF NOT EXISTS user_theory_done (
-                user_id   TEXT NOT NULL,
-                topic_key TEXT NOT NULL,
-                done_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                PRIMARY KEY (user_id, topic_key)
-            );
-        ");
-
-        $pdo->exec("CREATE INDEX IF NOT EXISTS idx_user_passed_tests_user_id ON user_passed_tests(user_id);");
-        $pdo->exec("CREATE INDEX IF NOT EXISTS idx_user_test_mistakes_user_id ON user_test_mistakes(user_id);");
-        $pdo->exec("CREATE INDEX IF NOT EXISTS idx_user_test_mistakes_test_id ON user_test_mistakes(test_id);");
-        $pdo->exec("CREATE INDEX IF NOT EXISTS idx_user_mistakes_user_id ON user_mistakes(user_id);");
-        $pdo->exec("CREATE INDEX IF NOT EXISTS idx_user_theory_done_user_id ON user_theory_done(user_id);");
-    }
+function user_generate_id(): string {
+  return bin2hex(random_bytes(16));
 }
 
-if (!function_exists('progress_slugify_topic')) {
-    function progress_slugify_topic(string $s): string
-    {
-        $s = trim($s);
-        if ($s === '') return '';
+function normalize_iso(?string $v): ?string {
+  if ($v === null) return null;
+  $v = trim($v);
+  if ($v === '' || strtolower($v) === 'null') return null;
 
-        if (function_exists('slugify_ua')) {
-            $slug = (string)slugify_ua($s);
-            if ($slug !== '') return $slug;
-        }
+  $ts = strtotime($v);
+  if ($ts === false) return null;
 
-        $map = [
-            'а'=>'a','б'=>'b','в'=>'v','г'=>'h','ґ'=>'g','д'=>'d','е'=>'e','є'=>'ye','ж'=>'zh','з'=>'z',
-            'и'=>'y','і'=>'i','ї'=>'yi','й'=>'y','к'=>'k','л'=>'l','м'=>'m','н'=>'n','о'=>'o','п'=>'p',
-            'р'=>'r','с'=>'s','т'=>'t','у'=>'u','ф'=>'f','х'=>'kh','ц'=>'ts','ч'=>'ch','ш'=>'sh','щ'=>'shch',
-            'ю'=>'yu','я'=>'ya','ь'=>'','\''=>'',
-        ];
-
-        $s = mb_strtolower($s, 'UTF-8');
-        $out = '';
-        $len = mb_strlen($s, 'UTF-8');
-
-        for ($i = 0; $i < $len; $i++) {
-            $ch = mb_substr($s, $i, 1, 'UTF-8');
-            if (isset($map[$ch])) {
-                $out .= $map[$ch];
-            } elseif (preg_match('/[a-z0-9]/u', $ch)) {
-                $out .= $ch;
-            } else {
-                $out .= '-';
-            }
-        }
-
-        $out = preg_replace('~-+~', '-', $out);
-        $out = trim((string)$out, '-');
-
-        return $out;
-    }
+  return gmdate('c', $ts);
 }
 
-if (!function_exists('progress_user_get')) {
-    function progress_user_get(string $uid): array
-    {
-        $uid = trim($uid);
+function row_to_user(array $row): array {
+  $meta = [];
 
-        progress_debug_log('progress_user_get:enter', [
-            'uid' => $uid,
-        ]);
-
-        if ($uid === '') {
-            return [
-                'passed_tests'   => [],
-                'theory_done'    => [],
-                'mistakes'       => [],
-                'mistakes_ids'   => [],
-                'mistakes_count' => 0,
-                'test_mistakes'  => [],
-            ];
-        }
-
-        $pdo = progress_db();
-
-        $passedTests = [];
-        $st = $pdo->prepare("
-            SELECT test_id, passed_at
-            FROM user_passed_tests
-            WHERE user_id = :uid
-        ");
-        $st->execute([':uid' => $uid]);
-
-        foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $row) {
-            $tid = (int)($row['test_id'] ?? 0);
-            if ($tid > 0) {
-                $passedTests[(string)$tid] = (string)($row['passed_at'] ?? '');
-            }
-        }
-
-        $theoryDone = [];
-        $st = $pdo->prepare("
-            SELECT topic_key, done_at
-            FROM user_theory_done
-            WHERE user_id = :uid
-        ");
-        $st->execute([':uid' => $uid]);
-
-        foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $row) {
-            $key = trim((string)($row['topic_key'] ?? ''));
-            if ($key !== '') {
-                $theoryDone[$key] = [
-                    'done'    => true,
-                    'done_at' => (string)($row['done_at'] ?? ''),
-                ];
-            }
-        }
-
-        $mistakeIdsSet = [];
-        $testMistakes = [];
-
-        $st = $pdo->prepare("
-            SELECT test_id, question_id, created_at
-            FROM user_test_mistakes
-            WHERE user_id = :uid
-            ORDER BY created_at DESC
-        ");
-        $st->execute([':uid' => $uid]);
-
-        foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $row) {
-            $testId = (int)($row['test_id'] ?? 0);
-            $qid    = (int)($row['question_id'] ?? 0);
-            $at     = (string)($row['created_at'] ?? '');
-
-            if ($qid <= 0) continue;
-
-            $mistakeIdsSet[$qid] = true;
-
-            $bucket = (string)$testId;
-            if (!isset($testMistakes[$bucket])) {
-                $testMistakes[$bucket] = [];
-            }
-            if (!isset($testMistakes[$bucket][$qid])) {
-                $testMistakes[$bucket][$qid] = $at;
-            }
-        }
-
-        $st = $pdo->prepare("
-            SELECT test_bucket, question_id, created_at
-            FROM user_mistakes
-            WHERE user_id = :uid
-            ORDER BY created_at DESC
-        ");
-        $st->execute([':uid' => $uid]);
-
-        foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $row) {
-            $testId = (int)($row['test_bucket'] ?? 0);
-            $qid    = (int)($row['question_id'] ?? 0);
-            $at     = (string)($row['created_at'] ?? '');
-
-            if ($qid <= 0) continue;
-
-            $mistakeIdsSet[$qid] = true;
-
-            $bucket = (string)$testId;
-            if (!isset($testMistakes[$bucket])) {
-                $testMistakes[$bucket] = [];
-            }
-            if (!isset($testMistakes[$bucket][$qid])) {
-                $testMistakes[$bucket][$qid] = $at;
-            }
-        }
-
-        $mistakeIds = array_map('intval', array_keys($mistakeIdsSet));
-        sort($mistakeIds);
-
-        $result = [
-            'passed_tests'   => $passedTests,
-            'theory_done'    => $theoryDone,
-            'mistakes'       => [
-                'ids'      => $mistakeIds,
-                'count'    => count($mistakeIds),
-                'by_test'  => $testMistakes,
-            ],
-            'mistakes_ids'   => $mistakeIds,
-            'mistakes_count' => count($mistakeIds),
-            'test_mistakes'  => $testMistakes,
-        ];
-
-        progress_debug_log('progress_user_get:return', [
-            'uid' => $uid,
-            'passed_tests_count' => count($passedTests),
-            'theory_done_count' => count($theoryDone),
-            'mistake_ids_count' => count($mistakeIds),
-            'mistake_ids_sample' => array_slice($mistakeIds, 0, 20),
-            'test_mistakes_buckets' => array_keys($testMistakes),
-        ]);
-
-        return $result;
+  if (isset($row['meta'])) {
+    if (is_array($row['meta'])) {
+      $meta = $row['meta'];
+    } elseif (is_string($row['meta'])) {
+      $j = json_decode($row['meta'], true);
+      if (is_array($j)) $meta = $j;
     }
+  }
+
+  $u = $meta;
+
+  $u['id'] = (string)($row['id'] ?? ($u['id'] ?? ''));
+  $u['email'] = (string)($row['email'] ?? ($u['email'] ?? ''));
+  $u['name'] = (string)($row['name'] ?? ($u['name'] ?? ''));
+  $u['password_hash'] = (string)($row['password_hash'] ?? ($u['password_hash'] ?? ''));
+
+  $u['plan'] = (string)($row['plan'] ?? ($u['plan'] ?? 'free'));
+  $u['expires_at'] = $row['expires_at'] ?? ($u['expires_at'] ?? null);
+  $u['paid_at'] = $row['paid_at'] ?? ($u['paid_at'] ?? null);
+  $u['created_at'] = (string)($row['created_at'] ?? ($u['created_at'] ?? gmdate('c')));
+
+  $u['expires_at'] = $u['expires_at'] ? normalize_iso((string)$u['expires_at']) : null;
+  $u['paid_at'] = $u['paid_at'] ? normalize_iso((string)$u['paid_at']) : null;
+
+  $p = strtolower(trim((string)$u['plan']));
+  if ($p === '' || $p === 'null') $p = 'free';
+  $u['plan'] = $p;
+
+  return $u;
 }
 
-if (!function_exists('progress_user_set')) {
-    function progress_user_set(string $uid, array $u): void
-    {
-        // compatibility stub
-    }
+function user_find_by_id(int|string $id): ?array {
+  $pdo = dbi();
+  $sid = (string)$id;
+
+  $st = $pdo->prepare("SELECT * FROM users WHERE id = :id LIMIT 1");
+  $st->execute(['id' => $sid]);
+  $row = $st->fetch();
+
+  return $row ? row_to_user($row) : null;
 }
 
-if (!function_exists('progress_add_mistakes')) {
-    function progress_add_mistakes(string $uid, int $testId, array $qids): void
-    {
-        $uidRaw = $uid;
-        $uid = trim($uid);
+function user_find_by_email(string $email): ?array {
+  $pdo = dbi();
+  $email = strtolower(trim($email));
+  if ($email === '') return null;
 
-        progress_debug_log('progress_add_mistakes:enter', [
-            'uid_raw' => $uidRaw,
-            'uid_trimmed' => $uid,
-            'test_id' => $testId,
-            'qids_raw' => $qids,
-        ]);
+  $st = $pdo->prepare("SELECT * FROM users WHERE LOWER(email)=LOWER(:e) LIMIT 1");
+  $st->execute(['e' => $email]);
+  $row = $st->fetch();
 
-        if ($uid === '') {
-            progress_debug_log('progress_add_mistakes:skip_empty_uid', [
-                'uid_raw' => $uidRaw,
-                'test_id' => $testId,
-            ]);
-            return;
-        }
-
-        $qids = array_values(array_unique(array_map('intval', $qids)));
-        $qids = array_values(array_filter($qids, fn($v) => $v > 0));
-
-        progress_debug_log('progress_add_mistakes:normalized', [
-            'uid' => $uid,
-            'test_id' => $testId,
-            'qids' => $qids,
-        ]);
-
-        if (!$qids) {
-            progress_debug_log('progress_add_mistakes:skip_empty_qids', [
-                'uid' => $uid,
-                'test_id' => $testId,
-            ]);
-            return;
-        }
-
-        try {
-            $pdo = progress_db();
-
-            $ins1 = $pdo->prepare("
-                INSERT INTO user_test_mistakes (user_id, test_id, question_id)
-                VALUES (:uid, :test_id, :qid)
-            ");
-
-            $ins2 = $pdo->prepare("
-                INSERT INTO user_mistakes (user_id, test_bucket, question_id)
-                VALUES (:uid, :test_bucket, :qid)
-            ");
-
-            foreach ($qids as $qid) {
-                $ins1->execute([
-                    ':uid'     => $uid,
-                    ':test_id' => $testId,
-                    ':qid'     => $qid,
-                ]);
-
-                $ins2->execute([
-                    ':uid'         => $uid,
-                    ':test_bucket' => $testId,
-                    ':qid'         => $qid,
-                ]);
-
-                progress_debug_log('progress_add_mistakes:inserted_one', [
-                    'uid' => $uid,
-                    'test_id' => $testId,
-                    'qid' => $qid,
-                ]);
-            }
-
-            $check1 = $pdo->prepare("
-                SELECT COUNT(*)::int AS c
-                FROM user_test_mistakes
-                WHERE user_id = :uid
-            ");
-            $check1->execute([':uid' => $uid]);
-            $row1 = $check1->fetch(PDO::FETCH_ASSOC);
-
-            $check2 = $pdo->prepare("
-                SELECT COUNT(*)::int AS c
-                FROM user_mistakes
-                WHERE user_id = :uid
-            ");
-            $check2->execute([':uid' => $uid]);
-            $row2 = $check2->fetch(PDO::FETCH_ASSOC);
-
-            progress_debug_log('progress_add_mistakes:after_insert_counts', [
-                'uid' => $uid,
-                'test_id' => $testId,
-                'user_test_mistakes_count' => (int)($row1['c'] ?? 0),
-                'user_mistakes_count' => (int)($row2['c'] ?? 0),
-            ]);
-        } catch (Throwable $e) {
-            progress_debug_log('progress_add_mistakes:ERROR', [
-                'uid' => $uid,
-                'test_id' => $testId,
-                'qids' => $qids,
-                'error' => $e->getMessage(),
-                'file' => $e->getFile(),
-                'line' => $e->getLine(),
-            ]);
-        }
-    }
+  return $row ? row_to_user($row) : null;
 }
 
-if (!function_exists('progress_remove_mistakes')) {
-    function progress_remove_mistakes(string $uid, array $qids): void
-    {
-        $uid = trim($uid);
-        if ($uid === '') return;
+function users_all(): array {
+  $pdo = dbi();
+  $st = $pdo->query("SELECT * FROM users ORDER BY created_at DESC");
+  $rows = $st->fetchAll();
 
-        $qids = array_values(array_unique(array_map('intval', $qids)));
-        $qids = array_values(array_filter($qids, fn($v) => $v > 0));
-        if (!$qids) return;
+  $out = [];
+  foreach ($rows as $r) {
+    $out[] = row_to_user($r);
+  }
 
-        $pdo = progress_db();
-        $placeholders = implode(',', array_fill(0, count($qids), '?'));
-
-        $sql1 = "DELETE FROM user_test_mistakes WHERE user_id = ? AND question_id IN ($placeholders)";
-        $sql2 = "DELETE FROM user_mistakes WHERE user_id = ? AND question_id IN ($placeholders)";
-
-        $params = array_merge([$uid], $qids);
-
-        $st = $pdo->prepare($sql1);
-        $st->execute($params);
-
-        $st = $pdo->prepare($sql2);
-        $st->execute($params);
-    }
+  return $out;
 }
 
-if (!function_exists('progress_mark_passed')) {
-    function progress_mark_passed(string $uid, int $testId): void
-    {
-        $uid = trim($uid);
-        if ($uid === '' || $testId <= 0) return;
+function user_create(string $email, string $name, string $passwordHash): string {
+  $pdo = dbi();
+  $email = strtolower(trim($email));
+  $name = trim($name);
 
-        $pdo = progress_db();
-        $st = $pdo->prepare("
-            INSERT INTO user_passed_tests (user_id, test_id)
-            VALUES (:uid, :test_id)
-            ON CONFLICT (user_id, test_id) DO UPDATE SET passed_at = NOW()
-        ");
-        $st->execute([
-            ':uid'     => $uid,
-            ':test_id' => $testId,
-        ]);
-    }
+  if ($email === '') {
+    throw new InvalidArgumentException('user_create: empty email');
+  }
+
+  $existing = user_find_by_email($email);
+  if ($existing) {
+    return (string)$existing['id'];
+  }
+
+  $id = user_generate_id();
+
+  $st = $pdo->prepare("
+    INSERT INTO users (id, email, name, password_hash, plan, meta)
+    VALUES (:id, :email, NULLIF(:name,''), :ph, 'free', '{}'::jsonb)
+  ");
+  $st->execute([
+    'id' => $id,
+    'email' => $email,
+    'name' => $name,
+    'ph' => $passwordHash,
+  ]);
+
+  return $id;
 }
 
-if (!function_exists('progress_all_mistakes_ids')) {
-    function progress_all_mistakes_ids(string $uid): array
-    {
-        $u = progress_user_get($uid);
-        $ids = $u['mistakes_ids'] ?? [];
-        if (!is_array($ids)) return [];
-
-        $ids = array_values(array_unique(array_map('intval', $ids)));
-        $ids = array_values(array_filter($ids, fn($v) => $v > 0));
-        sort($ids);
-
-        return $ids;
-    }
+function user_verify_password(array $user, string $pass): bool {
+  $hash = (string)($user['password_hash'] ?? '');
+  if ($hash === '') return false;
+  return password_verify($pass, $hash);
 }
 
-if (!function_exists('progress_mistakes_count')) {
-    function progress_mistakes_count(string $uid): int
-    {
-        return count(progress_all_mistakes_ids($uid));
-    }
+/**
+ * Головна функція для webhook/адмінки:
+ * Приймає повний масив $u і зберігає:
+ * - колонки: email,name,password_hash,plan,expires_at,paid_at
+ * - все інше у meta (JSONB)
+ */
+function user_upsert(array $u): array {
+  $pdo = dbi();
+
+  $id = (string)($u['id'] ?? '');
+  if ($id === '') {
+    throw new InvalidArgumentException('user_upsert: empty id');
+  }
+
+  $email = strtolower(trim((string)($u['email'] ?? '')));
+  $name  = trim((string)($u['name'] ?? ''));
+  $ph    = (string)($u['password_hash'] ?? '');
+
+  $plan = strtolower(trim((string)($u['plan'] ?? 'free')));
+  if ($plan === '' || $plan === 'null') $plan = 'free';
+
+  $expiresAt = $u['expires_at'] ?? null;
+  $paidAt    = $u['paid_at'] ?? null;
+
+  $expiresIso = $expiresAt ? normalize_iso((string)$expiresAt) : null;
+  $paidIso    = $paidAt ? normalize_iso((string)$paidAt) : null;
+
+  $expiresBind = $expiresIso ?? '';
+  $paidBind    = $paidIso ?? '';
+
+  $meta = $u;
+  unset(
+    $meta['id'],
+    $meta['email'],
+    $meta['name'],
+    $meta['password_hash'],
+    $meta['plan'],
+    $meta['expires_at'],
+    $meta['paid_at'],
+    $meta['created_at']
+  );
+
+  $metaJson = json_encode($meta, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+  if (!is_string($metaJson) || $metaJson === '') $metaJson = '{}';
+
+  $st = $pdo->prepare("
+    INSERT INTO users (id, email, name, password_hash, plan, expires_at, paid_at, meta)
+    VALUES (
+      :id,
+      NULLIF(:email,''),
+      NULLIF(:name,''),
+      NULLIF(:ph,''),
+      :plan,
+      NULLIF(:expires_at,'')::timestamptz,
+      NULLIF(:paid_at,'')::timestamptz,
+      :meta::jsonb
+    )
+    ON CONFLICT (id) DO UPDATE SET
+      email = COALESCE(NULLIF(EXCLUDED.email,''), users.email),
+      name  = COALESCE(NULLIF(EXCLUDED.name,''), users.name),
+      password_hash = COALESCE(NULLIF(EXCLUDED.password_hash,''), users.password_hash),
+      plan = EXCLUDED.plan,
+      expires_at = COALESCE(EXCLUDED.expires_at, users.expires_at),
+      paid_at    = COALESCE(EXCLUDED.paid_at, users.paid_at),
+      meta = users.meta || EXCLUDED.meta
+    RETURNING *
+  ");
+
+  $st->execute([
+    'id' => $id,
+    'email' => $email,
+    'name' => $name,
+    'ph' => $ph,
+    'plan' => $plan,
+    'expires_at' => $expiresBind,
+    'paid_at' => $paidBind,
+    'meta' => $metaJson,
+  ]);
+
+  $row = $st->fetch();
+  return $row ? row_to_user($row) : $u;
 }
 
-if (!function_exists('progress_mark_theory_done')) {
-    function progress_mark_theory_done(string $uid, string $topicKey): void
-    {
-        $uid = trim($uid);
-        $topicKey = trim($topicKey);
+/* =========================
+   OAuth helpers (Google)
+========================= */
 
-        if ($uid === '' || $topicKey === '') return;
+function oauth_find(string $provider, string $sub): ?array {
+  $pdo = dbi();
+  $provider = strtolower(trim($provider));
+  $sub = trim($sub);
+  if ($provider === '' || $sub === '') return null;
 
-        $pdo = progress_db();
+  $st = $pdo->prepare("
+    SELECT provider,sub,user_id,email,name,linked_at
+    FROM oauth_links
+    WHERE provider=:p AND sub=:s
+    LIMIT 1
+  ");
+  $st->execute([
+    'p' => $provider,
+    's' => $sub,
+  ]);
 
-        $keys = [$topicKey];
-        $slug = progress_slugify_topic($topicKey);
-        if ($slug !== '' && !in_array($slug, $keys, true)) {
-            $keys[] = $slug;
-        }
+  $row = $st->fetch();
+  return $row ?: null;
+}
 
-        $st = $pdo->prepare("
-            INSERT INTO user_theory_done (user_id, topic_key)
-            VALUES (:uid, :topic_key)
-            ON CONFLICT (user_id, topic_key) DO UPDATE SET done_at = NOW()
-        ");
+function oauth_user_id_by_provider_sub(string $provider, string $sub): ?string {
+  $r = oauth_find($provider, $sub);
+  if (!$r) return null;
 
-        foreach ($keys as $key) {
-            $st->execute([
-                ':uid' => $uid,
-                ':topic_key' => $key,
-            ]);
-        }
-    }
+  $uid = (string)($r['user_id'] ?? '');
+  return $uid !== '' ? $uid : null;
+}
+
+function oauth_link(string $provider, string $sub, string $userId, string $email = '', string $name = ''): array {
+  $pdo = dbi();
+  $provider = strtolower(trim($provider));
+  $sub = trim($sub);
+  $userId = trim($userId);
+
+  if ($provider === '' || $sub === '' || $userId === '') {
+    throw new InvalidArgumentException('oauth_link: provider/sub/userId required');
+  }
+
+  $u = user_find_by_id($userId);
+  if (!$u) {
+    user_upsert([
+      'id' => $userId,
+      'email' => $email,
+      'name' => $name,
+      'plan' => 'free',
+      'created_at' => gmdate('c'),
+    ]);
+  }
+
+  $st = $pdo->prepare("
+    INSERT INTO oauth_links (provider, sub, user_id, email, name)
+    VALUES (:p,:s,:uid, NULLIF(:e,''), NULLIF(:n,''))
+    ON CONFLICT (provider, sub)
+    DO UPDATE SET
+      user_id = EXCLUDED.user_id,
+      email = COALESCE(NULLIF(EXCLUDED.email,''), oauth_links.email),
+      name  = COALESCE(NULLIF(EXCLUDED.name,''), oauth_links.name)
+    RETURNING provider,sub,user_id,email,name,linked_at
+  ");
+
+  $st->execute([
+    'p' => $provider,
+    's' => $sub,
+    'uid' => $userId,
+    'e' => $email,
+    'n' => $name,
+  ]);
+
+  $row = $st->fetch();
+  return $row ?: (oauth_find($provider, $sub) ?? []);
 }
