@@ -1002,7 +1002,35 @@ if ($action === 'finish') {
             .pp-row{display:flex;gap:14px;flex-wrap:wrap;margin-top:10px}
             .pp-pill{background:#f1f3f7;border-radius:999px;padding:8px 12px;font-weight:700}
             .pp-actions{margin-top:14px;display:flex;gap:10px;flex-wrap:wrap}
-            .pp-btn{display:inline-block;padding:12px 14px;border-radius:14px;background:#0b1b14;color:#fff;text-decoration:none;border:none;font-weight:800}
+            .pp-btn{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    padding:12px 14px;
+    border-radius:14px;
+    background:#0b1b14;
+    color:#ffffff !important;
+    -webkit-text-fill-color:#ffffff;
+    text-decoration:none;
+    border:none;
+    font-weight:800;
+    line-height:1.2;
+    min-height:48px;
+    appearance:none;
+    -webkit-appearance:none;
+}
+.pp-btn:hover,
+.pp-btn:focus,
+.pp-btn:active,
+.pp-btn:visited{
+    color:#ffffff !important;
+    -webkit-text-fill-color:#ffffff;
+    text-decoration:none;
+}
+.pp-btn *{
+    color:#ffffff !important;
+    -webkit-text-fill-color:#ffffff;
+}
             .pp-btn2{display:inline-block;padding:12px 14px;border-radius:14px;background:#f1f3f7;color:#111;text-decoration:none;font-weight:800}
             .pp-status-ok{color:#0a7a3d}
             .pp-status-bad{color:#b42318}
