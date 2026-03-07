@@ -1225,9 +1225,6 @@ $topic = (string)($quiz['topic'] ?? '');
         <div class="pp-head">
             <div class="pp-hgroup">
                 <h1 class="pp-title"><?= h($title) ?></h1>
-                <?php if ($topic !== ''): ?>
-                    <div class="pp-topic"><?= h($topic) ?></div>
-                <?php endif; ?>
             </div>
         </div>
 

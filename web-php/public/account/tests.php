@@ -271,7 +271,6 @@ $csrf = csrf_token();
         <?php if ($mode === 'exam'): ?>
             <div class="topic-block">
                 <div class="topic-block__head">
-                    <h3 class="h3">Іспит</h3>
                 </div>
 
                 <div class="test-card">
