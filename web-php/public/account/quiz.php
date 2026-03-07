@@ -652,39 +652,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $repeatMistakes = !empty($_POST['mistakes']) || $mistakesOnly;
 
                 if ($repeatMistakes) {
-                    $mistakeIds = [];
+                    $mistakeIds = progress_all_mistakes_ids((string)$uid);
+$mistakeIds = array_values(array_filter(array_map('intval', $mistakeIds), fn($qid) => $qid > 0 && isset($qMap[$qid])));
 
-                    try {
-                        $pdo = db();
-
-                        $st = $pdo->prepare("
-                            SELECT DISTINCT question_id
-                            FROM user_mistakes
-                            WHERE user_id = :uid
-                            ORDER BY created_at DESC
-                        ");
-                        $st->execute([':uid' => (string)$uid]);
-
-                        $rows = $st->fetchAll(PDO::FETCH_ASSOC);
-
-                        foreach ($rows as $r) {
-                            $qid = (int)($r['question_id'] ?? 0);
-                            if ($qid > 0 && isset($qMap[$qid])) {
-                                $mistakeIds[] = $qid;
-                            }
-                        }
-
-                        $mistakeIds = array_values(array_unique($mistakeIds));
-                    } catch (Throwable $e) {
-                        $mistakeIds = [];
-                    }
+if (function_exists('progress_debug_log')) {
+    progress_debug_log('quiz_repeat_mistakes_pool_explicit', [
+        'uid' => (string)$uid,
+        'count' => count($mistakeIds),
+        'sample' => array_slice($mistakeIds, 0, 20),
+    ]);
+}
 
                     if (count($mistakeIds) < 1) {
-                        quiz_abort('Немає помилок для повтору', [
-                            'mode' => $mode,
-                            'mistakes_only' => true,
-                        ]);
-                    }
+    quiz_abort('Немає помилок для повтору', [
+        'mode' => 'mistakes',
+        'uid' => (string)$uid,
+        'mistake_ids_count' => count($mistakeIds),
+        'progress_all_mistakes_ids' => progress_all_mistakes_ids((string)$uid),
+        'qmap_count' => count($qMap),
+    ]);
+}
 
                     if ($seed === 0) $seed = 777;
                     $qIds = sample_ids($mistakeIds, min(40, count($mistakeIds)), $seed);
@@ -716,32 +703,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $failOnMistake = null;
             $mistakesOnly = true;
 
-            $mistakeIds = [];
-            try {
-                $pdo = db();
+            $mistakeIds = progress_all_mistakes_ids((string)$uid);
+$mistakeIds = array_values(array_filter(array_map('intval', $mistakeIds), fn($qid) => $qid > 0 && isset($qMap[$qid])));
 
-                $st = $pdo->prepare("
-                    SELECT DISTINCT question_id
-                    FROM user_mistakes
-                    WHERE user_id = :uid
-                    ORDER BY created_at DESC
-                ");
-                $st->execute([':uid' => (string)$uid]);
-
-                $rows = $st->fetchAll(PDO::FETCH_ASSOC);
-
-                foreach ($rows as $r) {
-                    $qid = (int)($r['question_id'] ?? 0);
-                    if ($qid > 0 && isset($qMap[$qid])) {
-                        $mistakeIds[] = $qid;
-                    }
-                }
-
-                $mistakeIds = array_values(array_unique($mistakeIds));
-            } catch (Throwable $e) {
-                $mistakeIds = [];
-            }
-
+if (function_exists('progress_debug_log')) {
+    progress_debug_log('quiz_repeat_mistakes_pool_trainer_mix', [
+        'uid' => (string)$uid,
+        'count' => count($mistakeIds),
+        'sample' => array_slice($mistakeIds, 0, 20),
+    ]);
+}
             if (count($mistakeIds) < 1) {
                 quiz_abort('Немає помилок для повтору', [
                     'mode' => 'mistakes',
