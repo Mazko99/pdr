@@ -1277,50 +1277,53 @@ $topic = (string)($quiz['topic'] ?? '');
         <div class="pp-bottom">
             <div class="pp-bar">
                 <div class="pp-bar__left">
-                    <div class="pp-pill"><small>Питання</small> <span><?= (int)($idx+1) ?></span>/<span><?= (int)$total ?></span></div>
+    <?php
+    $isTrainerMode = strpos((string)$quiz['mode'], 'trainer') === 0 || (string)$quiz['mode'] === 'mistakes';
 
-                    <?php
-                    $isTrainerMode = strpos((string)$quiz['mode'], 'trainer') === 0 || (string)$quiz['mode'] === 'mistakes';
+    $mistakes = (int)($quiz['mistakes'] ?? 0);
 
-                    $mistakes = (int)($quiz['mistakes'] ?? 0);
+    $uiLimit = $quiz['mistakes_ui_limit'] ?? null;
+    $uiLimit = is_null($uiLimit) ? null : (int)$uiLimit;
 
-                    $uiLimit = $quiz['mistakes_ui_limit'] ?? null;
-                    $uiLimit = is_null($uiLimit) ? null : (int)$uiLimit;
+    $maxMistakes = (int)($quiz['max_mistakes'] ?? 0);
 
-                    $maxMistakes = (int)($quiz['max_mistakes'] ?? 0);
+    if ($uiLimit !== null && $uiLimit > 0) {
+        $maxMistakes = $uiLimit;
+    } elseif ($maxMistakes <= 0) {
+        $modeSafe = (string)($quiz['mode'] ?? 'test');
 
-                    if ($uiLimit !== null && $uiLimit > 0) {
-                        $maxMistakes = $uiLimit;
-                    } elseif ($maxMistakes <= 0) {
-                        $modeSafe = (string)($quiz['mode'] ?? 'test');
+        if ($modeSafe === 'exam' || $modeSafe === 'exam_mix' || $modeSafe === 'exam_topic') {
+            $maxMistakes = 3;
+        } elseif (strpos($modeSafe, 'trainer') === 0 || $modeSafe === 'mistakes') {
+            $maxMistakes = 0;
+        } else {
+            $maxMistakes = 10;
+        }
+    }
+    ?>
 
-                        if ($modeSafe === 'exam' || $modeSafe === 'exam_mix' || $modeSafe === 'exam_topic') {
-                            $maxMistakes = 3;
-                        } elseif (strpos($modeSafe, 'trainer') === 0 || $modeSafe === 'mistakes') {
-                            $maxMistakes = 0;
-                        } else {
-                            $maxMistakes = 10;
-                        }
-                    }
-                    ?>
+    <?php if (!$isTrainerMode): ?>
+        <div class="pp-pill"><small>Питання</small> <span><?= (int)($idx+1) ?></span>/<span><?= (int)$total ?></span></div>
+    <?php endif; ?>
 
-                    <div class="pp-pill">
-                        <small>Помилки</small>
+    <div class="pp-pill">
+        <small>Помилки</small>
 
-                        <?php if ($isTrainerMode): ?>
-                            <span id="mistakesNow"><?= (int)$mistakes ?></span>
-                        <?php else: ?>
-                            <span id="mistakesNow"><?= (int)$mistakes ?></span>/<span><?= (int)$maxMistakes ?></span>
-                        <?php endif; ?>
-                    </div>
+        <?php if ($isTrainerMode): ?>
+            <span id="mistakesNow"><?= (int)$mistakes ?></span>
+        <?php else: ?>
+            <span id="mistakesNow"><?= (int)$mistakes ?></span>/<span><?= (int)$maxMistakes ?></span>
+        <?php endif; ?>
+    </div>
 
-                    <?php if ($timeLimit > 0): ?>
-                        <div class="pp-pill"><small>Час</small> <span id="timerText"><?= h(format_mmss((int)$timeLeft)) ?></span> / <span><?= h(format_mmss((int)$timeLimit)) ?></span></div>
-                    <?php else: ?>
-                        <div class="pp-pill"><small>Час</small> <span id="timerText">без ліміту</span></div>
-                    <?php endif; ?>
-                </div>
-
+    <?php if (!$isTrainerMode): ?>
+        <?php if ($timeLimit > 0): ?>
+            <div class="pp-pill"><small>Час</small> <span id="timerText"><?= h(format_mmss((int)$timeLeft)) ?></span> / <span><?= h(format_mmss((int)$timeLimit)) ?></span></div>
+        <?php else: ?>
+            <div class="pp-pill"><small>Час</small> <span id="timerText">без ліміту</span></div>
+        <?php endif; ?>
+    <?php endif; ?>
+</div>
                 <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
                     <a class="pp-btn2" href="/account/quiz.php?action=finish">Завершити</a>
 
