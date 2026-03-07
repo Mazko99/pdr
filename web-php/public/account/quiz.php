@@ -1204,9 +1204,90 @@ $topic = (string)($quiz['topic'] ?? '');
             border-radius:999px;padding:8px 12px;font-weight:900;
         }
         .pp-pill small{opacity:.7;font-weight:800}
-        .pp-btn{display:inline-flex;align-items:center;justify-content:center;padding:12px 14px;border-radius:14px;background:#0b1b14;color:#fff;text-decoration:none;border:none;font-weight:900}
-        .pp-btn2{display:inline-flex;align-items:center;justify-content:center;padding:12px 14px;border-radius:14px;background:#f1f3f7;color:#111;text-decoration:none;border:none;font-weight:900}
-        .pp-btn:disabled{opacity:.6}
+        .pp-btn,
+button.pp-btn,
+form button.pp-btn{
+    display:inline-flex !important;
+    align-items:center !important;
+    justify-content:center !important;
+    padding:12px 14px !important;
+    border-radius:14px !important;
+    background:#0b1b14 !important;
+    color:#ffffff !important;
+    -webkit-text-fill-color:#ffffff !important;
+    text-decoration:none !important;
+    border:none !important;
+    font-weight:900 !important;
+    line-height:1.2 !important;
+    min-height:48px !important;
+    appearance:none !important;
+    -webkit-appearance:none !important;
+    box-shadow:none !important;
+}
+
+.pp-btn:hover,
+.pp-btn:focus,
+.pp-btn:active,
+button.pp-btn:hover,
+button.pp-btn:focus,
+button.pp-btn:active,
+form button.pp-btn:hover,
+form button.pp-btn:focus,
+form button.pp-btn:active{
+    background:#0b1b14 !important;
+    color:#ffffff !important;
+    -webkit-text-fill-color:#ffffff !important;
+    text-decoration:none !important;
+    outline:none !important;
+}
+
+.pp-btn *,
+button.pp-btn *,
+form button.pp-btn *{
+    color:#ffffff !important;
+    -webkit-text-fill-color:#ffffff !important;
+}
+
+.pp-btn2,
+button.pp-btn2,
+form button.pp-btn2{
+    display:inline-flex !important;
+    align-items:center !important;
+    justify-content:center !important;
+    padding:12px 14px !important;
+    border-radius:14px !important;
+    background:#f1f3f7 !important;
+    color:#111111 !important;
+    -webkit-text-fill-color:#111111 !important;
+    text-decoration:none !important;
+    border:none !important;
+    font-weight:900 !important;
+    line-height:1.2 !important;
+    min-height:48px !important;
+    appearance:none !important;
+    -webkit-appearance:none !important;
+    box-shadow:none !important;
+}
+
+.pp-btn2:hover,
+.pp-btn2:focus,
+.pp-btn2:active,
+button.pp-btn2:hover,
+button.pp-btn2:focus,
+button.pp-btn2:active,
+form button.pp-btn2:hover,
+form button.pp-btn2:focus,
+form button.pp-btn2:active{
+    color:#111111 !important;
+    -webkit-text-fill-color:#111111 !important;
+    text-decoration:none !important;
+}
+
+.pp-btn:disabled,
+button.pp-btn:disabled,
+form button.pp-btn:disabled{
+    opacity:.6 !important;
+}
 
         @media (max-width: 560px){
             .pp-wrap{margin:14px auto}
