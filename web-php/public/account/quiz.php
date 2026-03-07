@@ -839,9 +839,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $quiz['wrong_qids'][] = $qid;
                 $quiz['wrong_qids'] = array_values(array_unique(array_map('intval', $quiz['wrong_qids'])));
                 $quiz['mistakes'] = count($quiz['wrong_qids']);
-
+ 
+                progress_debug_log('quiz_answer_wrong', [
+    'uid' => (string)$uid,
+    'qid' => (int)$qid,
+    'test_id_now' => (int)$testIdNow,
+    'mode_now' => (string)$modeNow,
+    'is_mistakes_only' => !empty($quiz['mistakes_only']) ? 1 : 0,
+]);
                 // завжди в загальний bucket
                 progress_add_mistakes((string)$uid, 0, [$qid]);
+                
+                progress_debug_log('quiz_finish_before_save', [
+    'uid' => (string)$uid,
+    'mode' => (string)$mode,
+    'test_id' => (int)$testId,
+    'is_trainer_mode' => $isTrainerMode ? 1 : 0,
+    'wrong_qids' => $wrongQids,
+    'wrong_qids_count' => count($wrongQids),
+    'session_quiz_mode' => (string)($quiz['mode'] ?? ''),
+    'session_answers_count' => is_array($quiz['answers'] ?? null) ? count($quiz['answers']) : 0,
+]);
 
                 // у звичайний тест — ще й по test_id
                 $testIdNow = (int)($quiz['test_id'] ?? 0);
