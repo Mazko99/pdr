@@ -1066,7 +1066,9 @@ if ($action === 'finish') {
                 <form method="post" action="/account/quiz.php" style="margin:0">
                     <input type="hidden" name="csrf" value="<?= h($csrf) ?>">
                     <input type="hidden" name="action" value="reset">
-                    <button class="pp-btn" type="submit">Завершити та вийти</button>
+                    <button class="pp-btn pp-btn--darkfix" type="submit">
+    <span class="pp-btn__label">Завершити та вийти</span>
+                    </button>
                 </form>
                 <a class="pp-btn2" href="/account/tests.php">До списку тестів</a>
                 <a class="pp-btn2" href="/account/index.php">В кабінет</a>

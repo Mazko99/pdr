@@ -1832,3 +1832,38 @@ a.btn--black *{
   }
 
 }
+.pp-btn--darkfix,
+button.pp-btn--darkfix,
+form button.pp-btn--darkfix{
+    background:#0b1b14 !important;
+    color:#ffffff !important;
+    -webkit-text-fill-color:#ffffff !important;
+    border:none !important;
+}
+
+.pp-btn--darkfix .pp-btn__label,
+.pp-btn--darkfix span,
+button.pp-btn--darkfix .pp-btn__label,
+button.pp-btn--darkfix span{
+    color:#ffffff !important;
+    -webkit-text-fill-color:#ffffff !important;
+    opacity:1 !important;
+}
+
+.pp-btn--darkfix:visited,
+.pp-btn--darkfix:hover,
+.pp-btn--darkfix:focus,
+.pp-btn--darkfix:active,
+button.pp-btn--darkfix:visited,
+button.pp-btn--darkfix:hover,
+button.pp-btn--darkfix:focus,
+button.pp-btn--darkfix:active{
+    background:#0b1b14 !important;
+    color:#ffffff !important;
+    -webkit-text-fill-color:#ffffff !important;
+}
+
+.pp-btn--darkfix *{
+    color:#ffffff !important;
+    -webkit-text-fill-color:#ffffff !important;
+}
