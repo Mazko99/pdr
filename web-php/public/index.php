@@ -1,6 +1,12 @@
 <?php
 declare(strict_types=1);
 
+if (isset($_GET['repair_sessions']) && $_GET['repair_sessions'] === '1') {
+    require_once __DIR__ . '/src/users_store.php';
+    sessions_repair_and_save();
+    exit('OK');
+}
+
 if (session_status() !== PHP_SESSION_ACTIVE) {
   @session_start();
 }
