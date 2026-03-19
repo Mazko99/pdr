@@ -13,6 +13,8 @@ require_once __DIR__ . '/db.php';
  * - user_create()
  * - user_verify_password()
  * - user_upsert()
+ * - user_save()
+ * - user_update()
  * - user_delete()
  * - user_has_access()
  *
@@ -22,15 +24,8 @@ require_once __DIR__ . '/db.php';
  * - oauth_user_id_by_provider_sub()
  * - oauth_link()
  *
- * + Sessions / devices helpers:
- * - session_current_id_safe()
- * - session_register_current()
- * - session_enforce_not_revoked()
- * - session_unregister_current_for_user()
- * - sessions_list_for_user()
- * - session_revoke_for_user()
- * - sessions_revoke_all_for_user()
- * - sessions_delete_user_all()
+ * ВАЖЛИВО:
+ * session-функцій тут НЕМАЄ, бо вони вже живуть у src/sessions_store.php
  */
 
 function dbi(): PDO {
@@ -40,7 +35,6 @@ function dbi(): PDO {
 }
 
 function ensure_schema(PDO $pdo): void {
-  // users table
   $pdo->exec("
     CREATE TABLE IF NOT EXISTS users (
       id            TEXT PRIMARY KEY,
@@ -55,7 +49,6 @@ function ensure_schema(PDO $pdo): void {
     );
   ");
 
-  // oauth links table
   $pdo->exec("
     CREATE TABLE IF NOT EXISTS oauth_links (
       provider   VARCHAR(32) NOT NULL,
@@ -68,42 +61,15 @@ function ensure_schema(PDO $pdo): void {
     );
   ");
 
-  // user sessions table
-  $pdo->exec("
-    CREATE TABLE IF NOT EXISTS user_sessions (
-      sid         VARCHAR(255) PRIMARY KEY,
-      user_id     TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      ip          VARCHAR(128),
-      ua          TEXT,
-      label       VARCHAR(190),
-      created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      last_seen   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      revoked_at  TIMESTAMPTZ NULL
-    );
-  ");
-
   $pdo->exec("CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);");
   $pdo->exec("CREATE INDEX IF NOT EXISTS idx_users_created ON users(created_at);");
   $pdo->exec("CREATE INDEX IF NOT EXISTS idx_oauth_user_id ON oauth_links(user_id);");
 
-  $pdo->exec("CREATE INDEX IF NOT EXISTS idx_user_sessions_user_id ON user_sessions(user_id);");
-  $pdo->exec("CREATE INDEX IF NOT EXISTS idx_user_sessions_last_seen ON user_sessions(last_seen);");
-  $pdo->exec("CREATE INDEX IF NOT EXISTS idx_user_sessions_revoked_at ON user_sessions(revoked_at);");
-
-  // Якщо users колись створився без нових колонок — докрутимо
   $pdo->exec("ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash VARCHAR(255);");
   $pdo->exec("ALTER TABLE users ADD COLUMN IF NOT EXISTS meta JSONB NOT NULL DEFAULT '{}'::jsonb;");
   $pdo->exec("ALTER TABLE users ADD COLUMN IF NOT EXISTS plan VARCHAR(32) NOT NULL DEFAULT 'free';");
   $pdo->exec("ALTER TABLE users ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ NULL;");
   $pdo->exec("ALTER TABLE users ADD COLUMN IF NOT EXISTS paid_at TIMESTAMPTZ NULL;");
-
-  // Якщо user_sessions колись створилась неповною — докрутимо
-  $pdo->exec("ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS ip VARCHAR(128);");
-  $pdo->exec("ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS ua TEXT;");
-  $pdo->exec("ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS label VARCHAR(190);");
-  $pdo->exec("ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW();");
-  $pdo->exec("ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS last_seen TIMESTAMPTZ NOT NULL DEFAULT NOW();");
-  $pdo->exec("ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS revoked_at TIMESTAMPTZ NULL;");
 }
 
 function user_generate_id(): string {
@@ -130,7 +96,9 @@ function row_to_user(array $row): array {
       $meta = $row['meta'];
     } elseif (is_string($row['meta'])) {
       $j = json_decode($row['meta'], true);
-      if (is_array($j)) $meta = $j;
+      if (is_array($j)) {
+        $meta = $j;
+      }
     }
   }
 
@@ -155,21 +123,6 @@ function row_to_user(array $row): array {
   $u['plan'] = $p;
 
   return $u;
-}
-
-function row_to_session(array $row): array {
-  return [
-    'sid' => (string)($row['sid'] ?? ''),
-    'user_id' => (string)($row['user_id'] ?? ''),
-    'ip' => (string)($row['ip'] ?? ''),
-    'ua' => (string)($row['ua'] ?? ''),
-    'label' => (string)($row['label'] ?? ''),
-    'created_at' => normalize_iso(isset($row['created_at']) ? (string)$row['created_at'] : '') ?? '',
-    'last_seen' => normalize_iso(isset($row['last_seen']) ? (string)$row['last_seen'] : '') ?? '',
-    'revoked_at' => isset($row['revoked_at']) && $row['revoked_at'] !== null
-      ? normalize_iso((string)$row['revoked_at'])
-      : null,
-  ];
 }
 
 function user_find_by_id(int|string $id): ?array {
@@ -245,9 +198,8 @@ function user_verify_password(array $user, string $pass): bool {
 }
 
 /**
- * Приймає повний масив $u і зберігає:
- * - колонки: email,name,password_hash,plan,expires_at,paid_at
- * - все інше у meta (JSONB)
+ * Головна функція для webhook/адмінки:
+ * зберігає колонки + все інше у meta (JSONB)
  */
 function user_upsert(array $u): array {
   $pdo = dbi();
@@ -287,7 +239,9 @@ function user_upsert(array $u): array {
   );
 
   $metaJson = json_encode($meta, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-  if (!is_string($metaJson) || $metaJson === '') $metaJson = '{}';
+  if (!is_string($metaJson) || $metaJson === '') {
+    $metaJson = '{}';
+  }
 
   $st = $pdo->prepare("
     INSERT INTO users (id, email, name, password_hash, plan, expires_at, paid_at, meta)
@@ -364,8 +318,7 @@ function user_has_access(array $user, ?int $nowTs = null): bool {
 }
 
 function users_repair_and_save(): void {
-  // Для Postgres нічого "ремонтувати" не треба.
-  // Лишаємо як no-op для сумісності зі старими викликами.
+  // no-op для сумісності зі старими викликами
 }
 
 /* =========================
@@ -465,232 +418,4 @@ function oauth_link(string $provider, string $sub, string $userId, string $email
 
   $row = $st->fetch(PDO::FETCH_ASSOC);
   return $row ?: (oauth_find($provider, $sub) ?? []);
-}
-
-/* =========================
-   Sessions / Devices helpers
-========================= */
-
-function client_ip_guess(): string {
-  $keys = ['HTTP_CF_CONNECTING_IP', 'HTTP_X_FORWARDED_FOR', 'HTTP_X_REAL_IP', 'REMOTE_ADDR'];
-
-  foreach ($keys as $k) {
-    $v = (string)($_SERVER[$k] ?? '');
-    if ($v === '') continue;
-
-    if (strpos($v, ',') !== false) {
-      $v = trim(explode(',', $v)[0]);
-    }
-
-    return trim($v);
-  }
-
-  return '';
-}
-
-function session_current_id_safe(): string {
-  if (session_status() !== PHP_SESSION_ACTIVE) return '';
-  $sid = session_id();
-  return is_string($sid) ? $sid : '';
-}
-
-/**
- * Якщо поточна сесія була відкликана — розлогінює.
- * Викликай після session_start() і після того, як знаєш user_id.
- */
-function session_enforce_not_revoked(string $uid): void {
-  $pdo = dbi();
-  $uid = trim($uid);
-  if ($uid === '') return;
-
-  $sid = session_current_id_safe();
-  if ($sid === '') return;
-
-  $st = $pdo->prepare("
-    SELECT sid, revoked_at
-    FROM user_sessions
-    WHERE sid = :sid AND user_id = :uid
-    LIMIT 1
-  ");
-  $st->execute([
-    'sid' => $sid,
-    'uid' => $uid,
-  ]);
-  $row = $st->fetch(PDO::FETCH_ASSOC);
-
-  if ($row && !empty($row['revoked_at'])) {
-    $_SESSION = [];
-
-    if (session_status() === PHP_SESSION_ACTIVE) {
-      @session_destroy();
-    }
-
-    if (ini_get('session.use_cookies')) {
-      $params = session_get_cookie_params();
-      @setcookie(session_name(), '', time() - 42000, $params['path'], $params['domain'], (bool)$params['secure'], (bool)$params['httponly']);
-    }
-
-    header('Location: /login?reason=session_revoked', true, 302);
-    exit;
-  }
-}
-
-/**
- * Реєструє або оновлює поточну сесію користувача.
- * Викликай після логіну і на авторизованих сторінках.
- */
-function session_register_current(string $uid, string $label = ''): void {
-  $pdo = dbi();
-  $uid = trim($uid);
-  if ($uid === '') return;
-  if (session_status() !== PHP_SESSION_ACTIVE) return;
-
-  $sid = session_current_id_safe();
-  if ($sid === '') return;
-
-  $ip = client_ip_guess();
-  $ua = (string)($_SERVER['HTTP_USER_AGENT'] ?? '');
-
-  $st = $pdo->prepare("
-    INSERT INTO user_sessions (sid, user_id, ip, ua, label, created_at, last_seen, revoked_at)
-    VALUES (
-      :sid,
-      :uid,
-      NULLIF(:ip,''),
-      NULLIF(:ua,''),
-      NULLIF(:label,''),
-      NOW(),
-      NOW(),
-      NULL
-    )
-    ON CONFLICT (sid) DO UPDATE SET
-      user_id = EXCLUDED.user_id,
-      ip = COALESCE(NULLIF(EXCLUDED.ip,''), user_sessions.ip),
-      ua = COALESCE(NULLIF(EXCLUDED.ua,''), user_sessions.ua),
-      label = CASE
-        WHEN NULLIF(EXCLUDED.label,'') IS NOT NULL THEN EXCLUDED.label
-        ELSE user_sessions.label
-      END,
-      last_seen = NOW(),
-      revoked_at = NULL
-  ");
-  $st->execute([
-    'sid' => $sid,
-    'uid' => $uid,
-    'ip' => $ip,
-    'ua' => $ua,
-    'label' => $label,
-  ]);
-}
-
-/**
- * При logout прибрати поточну сесію зі списку активних.
- */
-function session_unregister_current_for_user(string $uid): void {
-  $pdo = dbi();
-  $uid = trim($uid);
-  if ($uid === '') return;
-
-  $sid = session_current_id_safe();
-  if ($sid === '') return;
-
-  $st = $pdo->prepare("DELETE FROM user_sessions WHERE sid = :sid AND user_id = :uid");
-  $st->execute([
-    'sid' => $sid,
-    'uid' => $uid,
-  ]);
-}
-
-/**
- * Повертає список активних сесій користувача.
- */
-function sessions_list_for_user(string $uid): array {
-  $pdo = dbi();
-  $uid = trim($uid);
-  if ($uid === '') return [];
-
-  $st = $pdo->prepare("
-    SELECT sid, user_id, ip, ua, label, created_at, last_seen, revoked_at
-    FROM user_sessions
-    WHERE user_id = :uid
-      AND revoked_at IS NULL
-    ORDER BY last_seen DESC, created_at DESC
-  ");
-  $st->execute(['uid' => $uid]);
-
-  $rows = $st->fetchAll(PDO::FETCH_ASSOC);
-  $out = [];
-
-  foreach ($rows as $row) {
-    $out[] = row_to_session($row);
-  }
-
-  return $out;
-}
-
-/**
- * Відкликає конкретну сесію.
- */
-function session_revoke_for_user(string $uid, string $sid): void {
-  $pdo = dbi();
-  $uid = trim($uid);
-  $sid = trim($sid);
-  if ($uid === '' || $sid === '') return;
-
-  $st = $pdo->prepare("
-    UPDATE user_sessions
-    SET revoked_at = NOW()
-    WHERE sid = :sid AND user_id = :uid
-  ");
-  $st->execute([
-    'sid' => $sid,
-    'uid' => $uid,
-  ]);
-}
-
-/**
- * Відкликає всі сесії користувача, опційно крім однієї.
- */
-function sessions_revoke_all_for_user(string $uid, ?string $exceptSid = null): void {
-  $pdo = dbi();
-  $uid = trim($uid);
-  if ($uid === '') return;
-
-  $exceptSid = $exceptSid !== null ? trim($exceptSid) : null;
-
-  if ($exceptSid !== null && $exceptSid !== '') {
-    $st = $pdo->prepare("
-      UPDATE user_sessions
-      SET revoked_at = NOW()
-      WHERE user_id = :uid
-        AND revoked_at IS NULL
-        AND sid <> :except_sid
-    ");
-    $st->execute([
-      'uid' => $uid,
-      'except_sid' => $exceptSid,
-    ]);
-  } else {
-    $st = $pdo->prepare("
-      UPDATE user_sessions
-      SET revoked_at = NOW()
-      WHERE user_id = :uid
-        AND revoked_at IS NULL
-    ");
-    $st->execute([
-      'uid' => $uid,
-    ]);
-  }
-}
-
-/**
- * Повністю видалити всі сліди сесій користувача.
- */
-function sessions_delete_user_all(string $uid): void {
-  $pdo = dbi();
-  $uid = trim($uid);
-  if ($uid === '') return;
-
-  $st = $pdo->prepare("DELETE FROM user_sessions WHERE user_id = :uid");
-  $st->execute(['uid' => $uid]);
 }
