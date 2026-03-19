@@ -6,18 +6,26 @@ require_once __DIR__ . '/db.php';
 /**
  * users_store.php (Postgres)
  *
- * API сумісний з твоїм кодом:
+ * API сумісний з кодом:
  * - users_all()
  * - user_find_by_id()
  * - user_find_by_email()
  * - user_create()
  * - user_verify_password()
  * - user_upsert()
+ * - user_save()
+ * - user_update()
+ * - user_delete()
+ * - user_has_access()
  *
  * + OAuth helpers:
  * - oauth_find()
+ * - oauth_find_by_email()
  * - oauth_user_id_by_provider_sub()
  * - oauth_link()
+ *
+ * ВАЖЛИВО:
+ * session-функцій тут НЕМАЄ, бо вони вже живуть у src/sessions_store.php
  */
 
 function dbi(): PDO {
@@ -27,7 +35,6 @@ function dbi(): PDO {
 }
 
 function ensure_schema(PDO $pdo): void {
-  // users table
   $pdo->exec("
     CREATE TABLE IF NOT EXISTS users (
       id            TEXT PRIMARY KEY,
@@ -42,7 +49,6 @@ function ensure_schema(PDO $pdo): void {
     );
   ");
 
-  // oauth links table
   $pdo->exec("
     CREATE TABLE IF NOT EXISTS oauth_links (
       provider   VARCHAR(32) NOT NULL,
@@ -59,7 +65,6 @@ function ensure_schema(PDO $pdo): void {
   $pdo->exec("CREATE INDEX IF NOT EXISTS idx_users_created ON users(created_at);");
   $pdo->exec("CREATE INDEX IF NOT EXISTS idx_oauth_user_id ON oauth_links(user_id);");
 
-  // Якщо users колись створився без нових колонок — докрутимо
   $pdo->exec("ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash VARCHAR(255);");
   $pdo->exec("ALTER TABLE users ADD COLUMN IF NOT EXISTS meta JSONB NOT NULL DEFAULT '{}'::jsonb;");
   $pdo->exec("ALTER TABLE users ADD COLUMN IF NOT EXISTS plan VARCHAR(32) NOT NULL DEFAULT 'free';");
@@ -73,6 +78,7 @@ function user_generate_id(): string {
 
 function normalize_iso(?string $v): ?string {
   if ($v === null) return null;
+
   $v = trim($v);
   if ($v === '' || strtolower($v) === 'null') return null;
 
@@ -90,7 +96,9 @@ function row_to_user(array $row): array {
       $meta = $row['meta'];
     } elseif (is_string($row['meta'])) {
       $j = json_decode($row['meta'], true);
-      if (is_array($j)) $meta = $j;
+      if (is_array($j)) {
+        $meta = $j;
+      }
     }
   }
 
@@ -111,6 +119,7 @@ function row_to_user(array $row): array {
 
   $p = strtolower(trim((string)$u['plan']));
   if ($p === '' || $p === 'null') $p = 'free';
+  if (!in_array($p, ['free', 'basic', 'personal', 'dev'], true)) $p = 'free';
   $u['plan'] = $p;
 
   return $u;
@@ -122,7 +131,7 @@ function user_find_by_id(int|string $id): ?array {
 
   $st = $pdo->prepare("SELECT * FROM users WHERE id = :id LIMIT 1");
   $st->execute(['id' => $sid]);
-  $row = $st->fetch();
+  $row = $st->fetch(PDO::FETCH_ASSOC);
 
   return $row ? row_to_user($row) : null;
 }
@@ -134,7 +143,7 @@ function user_find_by_email(string $email): ?array {
 
   $st = $pdo->prepare("SELECT * FROM users WHERE LOWER(email)=LOWER(:e) LIMIT 1");
   $st->execute(['e' => $email]);
-  $row = $st->fetch();
+  $row = $st->fetch(PDO::FETCH_ASSOC);
 
   return $row ? row_to_user($row) : null;
 }
@@ -142,7 +151,7 @@ function user_find_by_email(string $email): ?array {
 function users_all(): array {
   $pdo = dbi();
   $st = $pdo->query("SELECT * FROM users ORDER BY created_at DESC");
-  $rows = $st->fetchAll();
+  $rows = $st->fetchAll(PDO::FETCH_ASSOC);
 
   $out = [];
   foreach ($rows as $r) {
@@ -190,9 +199,7 @@ function user_verify_password(array $user, string $pass): bool {
 
 /**
  * Головна функція для webhook/адмінки:
- * Приймає повний масив $u і зберігає:
- * - колонки: email,name,password_hash,plan,expires_at,paid_at
- * - все інше у meta (JSONB)
+ * зберігає колонки + все інше у meta (JSONB)
  */
 function user_upsert(array $u): array {
   $pdo = dbi();
@@ -208,6 +215,7 @@ function user_upsert(array $u): array {
 
   $plan = strtolower(trim((string)($u['plan'] ?? 'free')));
   if ($plan === '' || $plan === 'null') $plan = 'free';
+  if (!in_array($plan, ['free', 'basic', 'personal', 'dev'], true)) $plan = 'free';
 
   $expiresAt = $u['expires_at'] ?? null;
   $paidAt    = $u['paid_at'] ?? null;
@@ -231,7 +239,9 @@ function user_upsert(array $u): array {
   );
 
   $metaJson = json_encode($meta, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-  if (!is_string($metaJson) || $metaJson === '') $metaJson = '{}';
+  if (!is_string($metaJson) || $metaJson === '') {
+    $metaJson = '{}';
+  }
 
   $st = $pdo->prepare("
     INSERT INTO users (id, email, name, password_hash, plan, expires_at, paid_at, meta)
@@ -267,12 +277,52 @@ function user_upsert(array $u): array {
     'meta' => $metaJson,
   ]);
 
-  $row = $st->fetch();
+  $row = $st->fetch(PDO::FETCH_ASSOC);
   return $row ? row_to_user($row) : $u;
 }
 
+function user_save(array $u): array {
+  return user_upsert($u);
+}
+
+function user_update(int|string $id, array $patch): array {
+  $existing = user_find_by_id((string)$id) ?? ['id' => (string)$id];
+  $merged = array_merge($existing, $patch, ['id' => (string)$id]);
+  return user_upsert($merged);
+}
+
+function user_delete(int|string $id): bool {
+  $pdo = dbi();
+  $sid = (string)$id;
+  if ($sid === '') return false;
+
+  $st = $pdo->prepare("DELETE FROM users WHERE id = :id");
+  $st->execute(['id' => $sid]);
+
+  return $st->rowCount() > 0;
+}
+
+function user_has_access(array $user, ?int $nowTs = null): bool {
+  $plan = strtolower((string)($user['plan'] ?? 'free'));
+  if ($plan === 'dev') return true;
+  if ($plan !== 'basic' && $plan !== 'personal') return false;
+
+  $exp = $user['expires_at'] ?? null;
+  if ($exp === null || $exp === '' || $exp === 'null') return true;
+
+  $ts = strtotime((string)$exp);
+  if ($ts === false) return true;
+
+  $now = $nowTs ?? time();
+  return $ts > $now;
+}
+
+function users_repair_and_save(): void {
+  // no-op для сумісності зі старими викликами
+}
+
 /* =========================
-   OAuth helpers (Google)
+   OAuth helpers
 ========================= */
 
 function oauth_find(string $provider, string $sub): ?array {
@@ -282,9 +332,9 @@ function oauth_find(string $provider, string $sub): ?array {
   if ($provider === '' || $sub === '') return null;
 
   $st = $pdo->prepare("
-    SELECT provider,sub,user_id,email,name,linked_at
+    SELECT provider, sub, user_id, email, name, linked_at
     FROM oauth_links
-    WHERE provider=:p AND sub=:s
+    WHERE provider = :p AND sub = :s
     LIMIT 1
   ");
   $st->execute([
@@ -292,7 +342,29 @@ function oauth_find(string $provider, string $sub): ?array {
     's' => $sub,
   ]);
 
-  $row = $st->fetch();
+  $row = $st->fetch(PDO::FETCH_ASSOC);
+  return $row ?: null;
+}
+
+function oauth_find_by_email(string $provider, string $email): ?array {
+  $pdo = dbi();
+  $provider = strtolower(trim($provider));
+  $email = strtolower(trim($email));
+  if ($provider === '' || $email === '') return null;
+
+  $st = $pdo->prepare("
+    SELECT provider, sub, user_id, email, name, linked_at
+    FROM oauth_links
+    WHERE provider = :p AND LOWER(email) = LOWER(:e)
+    ORDER BY linked_at DESC
+    LIMIT 1
+  ");
+  $st->execute([
+    'p' => $provider,
+    'e' => $email,
+  ]);
+
+  $row = $st->fetch(PDO::FETCH_ASSOC);
   return $row ?: null;
 }
 
@@ -327,13 +399,13 @@ function oauth_link(string $provider, string $sub, string $userId, string $email
 
   $st = $pdo->prepare("
     INSERT INTO oauth_links (provider, sub, user_id, email, name)
-    VALUES (:p,:s,:uid, NULLIF(:e,''), NULLIF(:n,''))
+    VALUES (:p, :s, :uid, NULLIF(:e,''), NULLIF(:n,''))
     ON CONFLICT (provider, sub)
     DO UPDATE SET
       user_id = EXCLUDED.user_id,
       email = COALESCE(NULLIF(EXCLUDED.email,''), oauth_links.email),
       name  = COALESCE(NULLIF(EXCLUDED.name,''), oauth_links.name)
-    RETURNING provider,sub,user_id,email,name,linked_at
+    RETURNING provider, sub, user_id, email, name, linked_at
   ");
 
   $st->execute([
@@ -344,6 +416,6 @@ function oauth_link(string $provider, string $sub, string $userId, string $email
     'n' => $name,
   ]);
 
-  $row = $st->fetch();
+  $row = $st->fetch(PDO::FETCH_ASSOC);
   return $row ?: (oauth_find($provider, $sub) ?? []);
 }

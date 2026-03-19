@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/_guard.php';
 require_once __DIR__ . '/../../src/users_store.php';
+require_once __DIR__ . '/../../src/sessions_store.php';
 require_once __DIR__ . '/../../src/chat_store.php';
 
 if (session_status() !== PHP_SESSION_ACTIVE) @session_start();
