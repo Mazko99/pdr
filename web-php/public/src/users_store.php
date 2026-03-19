@@ -32,7 +32,7 @@ declare(strict_types=1);
  */
 
 function users_store_path(): string {
-  $path = '/data/users.json';
+  return '/data/users.json';
 }
 if (!file_exists('/data/users.json')) {
     file_put_contents('/data/users.json', json_encode([
@@ -217,6 +217,9 @@ function user_save(array $user): array {
   $id = (string)($user['id'] ?? '');
   if ($id === '') throw new InvalidArgumentException('user_save: empty id');
   return user_update($id, $user);
+}
+function user_upsert(array $user): array {
+  return user_save($user);
 }
 
 /**
