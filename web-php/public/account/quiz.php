@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../../src/bootstrap.php';
 require_once __DIR__ . '/../../src/progress_store.php';
+require_once __DIR__ . '/../../src/activity_store.php';
 
 /**
  * ProstoPDR / public/account/quiz.php
@@ -127,6 +128,36 @@ function quiz_abort(string $title, array $debug = []): void {
             </div>
         </div>
     </div>
+    <script>
+(function () {
+  var lastSentAt = 0;
+
+  function sendPing() {
+    if (document.visibilityState !== 'visible') return;
+
+    var now = Date.now();
+    if (now - lastSentAt < 25000) return;
+    lastSentAt = now;
+
+    var body = new URLSearchParams();
+    body.append('page', window.location.pathname + window.location.search);
+
+    fetch('/api/activity_ping.php', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8'
+      },
+      credentials: 'same-origin',
+      body: body.toString()
+    }).catch(function(){});
+  }
+
+  setInterval(sendPing, 30000);
+  document.addEventListener('visibilitychange', sendPing);
+  window.addEventListener('focus', sendPing);
+  sendPing();
+})();
+</script>
     </body>
     </html>
     <?php
@@ -428,9 +459,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = (string)($_POST['action'] ?? '');
 
     if ($action === 'reset') {
-        unset($_SESSION['quiz']);
-        quiz_redirect('/account/tests.php');
-    }
+    unset($_SESSION['quiz'], $_SESSION['activity_attempt_id']);
+    quiz_redirect('/account/tests.php');
+}
 
     if ($action === 'start') {
         $mode = (string)($_POST['mode'] ?? 'test');
@@ -724,15 +755,26 @@ if (function_exists('progress_debug_log')) {
         }
 
         if (!is_array($qIds) || count($qIds) < 1) {
-            quiz_abort('Не вдалося сформувати список питань', [
-                'mode' => $mode,
-                'test_id' => $testId,
-                'topic' => $topicReq,
-                'part' => $partReq,
-            ]);
-        }
+    quiz_abort('Не вдалося сформувати список питань', [
+        'mode' => $mode,
+        'test_id' => $testId,
+        'topic' => $topicReq,
+        'part' => $partReq,
+    ]);
+}
 
-        $_SESSION['quiz'] = [
+unset($_SESSION['activity_attempt_id']);
+
+$attemptId = activity_start_attempt((string)$uid, [
+    'test_id' => (string)$testId,
+    'test_title' => (string)$title,
+    'test_mode' => (string)$mode,
+    'total_questions' => count($qIds),
+]);
+
+$_SESSION['activity_attempt_id'] = $attemptId;
+
+$_SESSION['quiz'] = [
             'mode' => $mode,
             'test_id' => $testId,
             'title' => $title,
@@ -787,6 +829,10 @@ if (function_exists('progress_debug_log')) {
 
         $correct = (int)$q['correct'];
         $isCorrect = ($choice === $correct);
+        $attemptId = (string)($_SESSION['activity_attempt_id'] ?? '');
+if ($attemptId !== '') {
+    activity_mark_answer((string)$uid, $attemptId, (bool)$isCorrect);
+}
 
         if (!isset($quiz['answers']) || !is_array($quiz['answers'])) $quiz['answers'] = [];
         if (!isset($quiz['wrong_qids']) || !is_array($quiz['wrong_qids'])) $quiz['wrong_qids'] = [];
@@ -943,6 +989,11 @@ if ($action === 'finish') {
     $mode = (string)($quiz['mode'] ?? 'test');
     $testId = (int)($quiz['test_id'] ?? 0);
     $isMistakesOnly = !empty($quiz['mistakes_only']);
+    $attemptId = (string)($_SESSION['activity_attempt_id'] ?? '');
+if ($attemptId !== '') {
+    activity_finish_attempt((string)$uid, $attemptId);
+    unset($_SESSION['activity_attempt_id']);
+}
 
     $wrongQids = [];
     foreach ($answers as $a) {

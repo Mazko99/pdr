@@ -5,6 +5,8 @@ require_once __DIR__ . '/../../src/bootstrap.php';
 require_once __DIR__ . '/../../src/users_store.php';
 require_once __DIR__ . '/../../src/progress_store.php';
 require_once __DIR__ . '/../../src/db.php';
+require_once __DIR__ . '/../../src/activity_store.php';
+
 
 // 1) Треба бути залогіненим
 if (!auth_user_id()) {
@@ -46,6 +48,10 @@ if ($uidStr === '') {
 // ---- user ----
 $user = function_exists('user_find_by_id') ? user_find_by_id($uidStr) : null;
 
+if (!empty($user['id']) && empty($_SESSION['activity_login_marked'])) {
+  activity_mark_login((string)$user['id'], $_SERVER['REQUEST_URI'] ?? '/');
+  $_SESSION['activity_login_marked'] = 1;
+} 
 $nameRaw = (string)($user['name'] ?? ($_SESSION['user_name'] ?? 'Користувач'));
 $email = (string)($user['email'] ?? ($_SESSION['user_email'] ?? ''));
 
@@ -886,6 +892,64 @@ $sessions = function_exists('sessions_list_for_user') ? sessions_list_for_user($
   if (document.fonts && document.fonts.ready) {
     document.fonts.ready.then(syncHeights).catch(()=>{});
   }
+})();
+<script>
+(function () {
+  var lastSentAt = 0;
+
+  function sendPing() {
+    if (document.visibilityState !== 'visible') return;
+
+    var now = Date.now();
+    if (now - lastSentAt < 25000) return;
+    lastSentAt = now;
+
+    var body = new URLSearchParams();
+    body.append('page', window.location.pathname + window.location.search);
+
+    fetch('/api/activity_ping.php', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8'
+      },
+      credentials: 'same-origin',
+      body: body.toString()
+    }).catch(function(){});
+  }
+
+  setInterval(sendPing, 30000);
+  document.addEventListener('visibilitychange', sendPing);
+  window.addEventListener('focus', sendPing);
+  sendPing();
+})();
+<script>
+(function () {
+  var lastSentAt = 0;
+
+  function sendPing() {
+    if (document.visibilityState !== 'visible') return;
+
+    var now = Date.now();
+    if (now - lastSentAt < 25000) return;
+    lastSentAt = now;
+
+    var body = new URLSearchParams();
+    body.append('page', window.location.pathname + window.location.search);
+
+    fetch('/api/activity_ping.php', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8'
+      },
+      credentials: 'same-origin',
+      body: body.toString()
+    }).catch(function(){});
+  }
+
+  setInterval(sendPing, 30000);
+  document.addEventListener('visibilitychange', sendPing);
+  window.addEventListener('focus', sendPing);
+  sendPing();
 })();
 </script>
 <?php require_once __DIR__ . '/../partials/chat_widget.php'; ?>

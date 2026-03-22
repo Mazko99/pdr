@@ -5,6 +5,7 @@ require_once __DIR__ . '/_guard.php';
 require_once __DIR__ . '/../../src/users_store.php';
 require_once __DIR__ . '/../../src/sessions_store.php';
 require_once __DIR__ . '/../../src/chat_store.php';
+require_once __DIR__ . '/../../src/activity_store.php';
 
 if (session_status() !== PHP_SESSION_ACTIVE) @session_start();
 
@@ -26,6 +27,24 @@ if (!is_array($user)) {
 
 $notice = '';
 $error = '';
+
+function fmt_seconds_admin(int $seconds): string {
+  $seconds = max(0, $seconds);
+
+  $h = intdiv($seconds, 3600);
+  $m = intdiv($seconds % 3600, 60);
+  $s = $seconds % 60;
+
+  if ($h > 0) return $h . ' г ' . $m . ' хв';
+  if ($m > 0) return $m . ' хв ' . $s . ' с';
+  return $s . ' с';
+}
+
+function fmt_dt_admin(?string $iso): string {
+  $iso = trim((string)$iso);
+  if ($iso === '' || strtolower($iso) === 'null') return '—';
+  return $iso;
+}
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   admin_csrf_verify($_POST['csrf'] ?? null);
@@ -105,6 +124,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   // refresh user
   $user = user_find_by_id($uid);
 }
+
+$activity = activity_get_user_summary($uid);
+$attempts = activity_get_user_attempts($uid, 30);
 
 $sessions = [];
 if (function_exists('sessions_list_for_user')) {
@@ -220,6 +242,78 @@ if (function_exists('sessions_list_for_user')) {
           <button class="btn btn--ghost danger" type="submit">Видалити користувача</button>
         </form>
       </div>
+    </div>
+
+        <div class="account-card" style="margin-top:12px;">
+      <div class="h3" style="margin-top:0;">Активність користувача</div>
+
+      <div class="row">
+        <div class="col">
+          <div class="muted">Останній вхід</div>
+          <div style="font-weight:900;margin-bottom:10px;"><?= h(fmt_dt_admin((string)($activity['last_login_at'] ?? ''))) ?></div>
+
+          <div class="muted">Остання активність</div>
+          <div style="font-weight:900;margin-bottom:10px;"><?= h(fmt_dt_admin((string)($activity['last_seen_at'] ?? ''))) ?></div>
+
+          <div class="muted">Остання сторінка</div>
+          <div style="font-weight:900;word-break:break-word;"><?= h((string)($activity['last_page'] ?? '—')) ?></div>
+        </div>
+
+        <div class="col">
+          <div class="muted">Час на сайті</div>
+          <div style="font-weight:900;margin-bottom:10px;"><?= h(fmt_seconds_admin((int)($activity['total_site_seconds'] ?? 0))) ?></div>
+
+          <div class="muted">Почато тестів</div>
+          <div style="font-weight:900;margin-bottom:10px;"><?= (int)($activity['tests_started'] ?? 0) ?></div>
+
+          <div class="muted">Завершено тестів</div>
+          <div style="font-weight:900;margin-bottom:10px;"><?= (int)($activity['tests_finished'] ?? 0) ?></div>
+
+          <div class="muted">Усього правильних / помилок</div>
+          <div style="font-weight:900;">
+            <?= (int)($activity['total_correct_answers'] ?? 0) ?> / <?= (int)($activity['total_wrong_answers'] ?? 0) ?>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="account-card" style="margin-top:12px;">
+      <div class="h3" style="margin-top:0;">Останні проходження тестів</div>
+
+      <?php if (empty($attempts)): ?>
+        <div class="muted">Поки нема зібраних даних по тестах.</div>
+      <?php else: ?>
+        <table class="tbl">
+          <thead>
+            <tr>
+              <th>Тест</th>
+              <th>Режим</th>
+              <th>Старт</th>
+              <th>Фініш</th>
+              <th>Час</th>
+              <th>Питань</th>
+              <th>Прав.</th>
+              <th>Помилки</th>
+              <th>Статус</th>
+            </tr>
+          </thead>
+          <tbody>
+            <?php foreach ($attempts as $a): ?>
+              <tr>
+                <td style="font-weight:900;"><?= h((string)($a['test_title'] ?? '—')) ?></td>
+                <td class="muted"><?= h((string)($a['test_mode'] ?? '—')) ?></td>
+                <td class="muted"><?= h(fmt_dt_admin((string)($a['started_at'] ?? ''))) ?></td>
+                <td class="muted"><?= h(fmt_dt_admin((string)($a['finished_at'] ?? ''))) ?></td>
+                <td class="muted"><?= h(fmt_seconds_admin((int)($a['duration_seconds'] ?? 0))) ?></td>
+                <td class="muted"><?= (int)($a['total_questions'] ?? 0) ?></td>
+                <td class="muted"><?= (int)($a['correct_answers'] ?? 0) ?></td>
+                <td class="muted"><?= (int)($a['wrong_answers'] ?? 0) ?></td>
+                <td class="muted"><?= h((string)($a['status'] ?? '—')) ?></td>
+              </tr>
+            <?php endforeach; ?>
+          </tbody>
+        </table>
+      <?php endif; ?>
     </div>
 
     <div class="account-card" style="margin-top:12px;">

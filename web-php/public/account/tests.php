@@ -112,6 +112,65 @@ if (!$hasAccess) {
                 </div>
             </div>
         </main>
+    <script>
+(function () {
+  var lastSentAt = 0;
+
+  function sendPing() {
+    if (document.visibilityState !== 'visible') return;
+
+    var now = Date.now();
+    if (now - lastSentAt < 25000) return;
+    lastSentAt = now;
+
+    var body = new URLSearchParams();
+    body.append('page', window.location.pathname + window.location.search);
+
+    fetch('/api/activity_ping.php', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8'
+      },
+      credentials: 'same-origin',
+      body: body.toString()
+    }).catch(function(){});
+  }
+
+  setInterval(sendPing, 30000);
+  document.addEventListener('visibilitychange', sendPing);
+  window.addEventListener('focus', sendPing);
+  sendPing();
+})();
+<script>
+(function () {
+  var lastSentAt = 0;
+
+  function sendPing() {
+    if (document.visibilityState !== 'visible') return;
+
+    var now = Date.now();
+    if (now - lastSentAt < 25000) return;
+    lastSentAt = now;
+
+    var body = new URLSearchParams();
+    body.append('page', window.location.pathname + window.location.search);
+
+    fetch('/api/activity_ping.php', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8'
+      },
+      credentials: 'same-origin',
+      body: body.toString()
+    }).catch(function(){});
+  }
+
+  setInterval(sendPing, 30000);
+  document.addEventListener('visibilitychange', sendPing);
+  window.addEventListener('focus', sendPing);
+  sendPing();
+})();
+</script>
     </body>
     </html>
     <?php
