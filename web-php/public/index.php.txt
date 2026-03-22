@@ -458,7 +458,6 @@ $isAdminUi = !empty($_SESSION['is_admin']) && $_SESSION['is_admin'] === true;
 
       <div class="header__actions">
         <?php if (!$isAuthed): ?>
-          <a class="btn btn--ghost header__cta-hide-mobile header__trial" href="/login/index.php">Тестовий доступ на 3 дні</a>
           <a class="btn btn--primary header__cta-hide-mobile" href="/login">увійти</a>
         <?php else: ?>
           <button class="userpill" type="button" data-user-menu-btn aria-label="Профіль">
@@ -513,7 +512,6 @@ $isAdminUi = !empty($_SESSION['is_admin']) && $_SESSION['is_admin'] === true;
         <?php else: ?>
           <a class="btn btn--ghost mobile__btn" href="/login/index.php">Вхід</a>
           <a class="btn btn--primary mobile__btn" href="/login/index.php">Реєстрація</a>
-          <a class="btn btn--ghost mobile__btn" href="#demo">Тестовий доступ 3 дні</a>
         <?php endif; ?>
       </div>
     </div>
@@ -554,10 +552,10 @@ $isAdminUi = !empty($_SESSION['is_admin']) && $_SESSION['is_admin'] === true;
 
       <div class="ribbon">
         <div class="ribbon__track">
-          <span>тестовий доступ 3 дні • режим іспиту • пояснення • статистика • повтор помилок</span>
-          <span>тестовий доступ 3 дні • режим іспиту • пояснення • статистика • повтор помилок</span>
-          <span>тестовий доступ 3 дні • режим іспиту • пояснення • статистика • повтор помилок</span>
-          <span>тестовий доступ 3 дні • режим іспиту • пояснення • статистика • повтор помилок</span>
+          <span>режим іспиту • пояснення • статистика • повтор помилок • тести ПДР онлайн</span>
+          <span>режим іспиту • пояснення • статистика • повтор помилок • тести ПДР онлайн</span>
+          <span>режим іспиту • пояснення • статистика • повтор помилок • тести ПДР онлайн</span>
+          <span>режим іспиту • пояснення • статистика • повтор помилок • тести ПДР онлайн</span>
         </div>
       </div>
     </section>
@@ -664,7 +662,6 @@ $isAdminUi = !empty($_SESSION['is_admin']) && $_SESSION['is_admin'] === true;
               </ul>
 
               <div class="plan__cta-row">
-                <a class="btn btn--ghost plan__cta" href="/login/index.php">Отримати 3 дні безкоштовно</a>
                 <a class="btn btn--primary plan__cta" href="/login/index.php">Обрати</a>
               </div>
             </article>
@@ -695,7 +692,6 @@ $isAdminUi = !empty($_SESSION['is_admin']) && $_SESSION['is_admin'] === true;
               </ul>
 
               <div class="plan__cta-row">
-                <a class="btn btn--ghost plan__cta" href="/login/index.php">Отримати 3 дні безкоштовно</a>
                 <a class="btn btn--primary plan__cta" href="/login/index.php">Обрати</a>
               </div>
             </article>
@@ -824,10 +820,6 @@ $isAdminUi = !empty($_SESSION['is_admin']) && $_SESSION['is_admin'] === true;
       <div class="container demo">
         <div class="demo__box">
           <div class="demo__icon">🚗</div>
-          <p class="demo__text">
-            Хочеш спробувати платформу перед оплатою? Активуй <b>тестовий доступ на 3 дні</b> і пройди тренування безкоштовно.
-          </p>
-          <a class="btn btn--xl btn--primary" href="/login/index.php">Тестовий доступ на 3 дні</a>
         </div>
 
         <h2 class="h2">Хочеш готуватися як на реальному іспиті?</h2>
@@ -859,7 +851,7 @@ $isAdminUi = !empty($_SESSION['is_admin']) && $_SESSION['is_admin'] === true;
           </div>
 
           <button class="faq__item" type="button" data-faq-item>
-            <span>Що входить у тестовий доступ на 3 дні?</span>
+            <span>Що входить у доступ після оплати?</span>
             <span class="faq__arrow">→</span>
           </button>
           <div class="faq__panel">
