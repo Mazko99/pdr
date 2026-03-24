@@ -718,7 +718,38 @@ $isAdminUi = !empty($_SESSION['is_admin']) && $_SESSION['is_admin'] === true;
     <section class="section">
       <div class="container">
         <h2 class="h2">Процес підготовки в ProstoPDR</h2>
+                <div class="video-review">
+          <div class="video-review__card">
+            <div class="video-review__head">
+              <div>
+                <h3 class="video-review__title">Відеоогляд платформи</h3>
+                <p class="video-review__text">
+                  Подивись короткий огляд ProstoPDR: як виглядає кабінет, як проходять тести,
+                  де видно пояснення, помилки та статистику прогресу.
+                </p>
+              </div>
 
+              <div class="video-review__badge">Огляд</div>
+            </div>
+
+            <div class="video-review__player">
+              <video
+                controls
+                playsinline
+                preload="metadata"
+                poster="/assets/img/video-preview.jpg"
+              >
+                <source src="/assets/video/overview.mp4" type="video/mp4">
+                Ваш браузер не підтримує відтворення відео.
+              </video>
+            </div>
+
+            <div class="video-review__note">
+              Якщо відео не відображається — перевір, що файл завантажений у
+              <strong>/public/assets/video/overview.mp4</strong>
+            </div>
+          </div>
+        </div>
         <div class="big-steps">
           <article class="big-step">
             <div class="big-step__left">
