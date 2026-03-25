@@ -722,14 +722,13 @@ $isAdminUi = !empty($_SESSION['is_admin']) && $_SESSION['is_admin'] === true;
   <div class="video-review__card">
     <h3 class="big-step__title video-review__title">Відеоогляд платформи</h3>
 
-    <div class="video-review__player video-review__player--youtube">
+    <div class="video-review__player">
       <iframe
-        src="https://www.youtube-nocookie.com/embed/NqtdBq9Yc_8?rel=0&modestbranding=1&playsinline=1"
+        src="https://www.youtube.com/embed/NqtdBq9Yc_8?rel=0&modestbranding=1&playsinline=1"
         title="Відеоогляд платформи ProstoPDR"
         loading="lazy"
         allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-        allowfullscreen
-        referrerpolicy="strict-origin-when-cross-origin">
+        allowfullscreen>
       </iframe>
     </div>
   </div>
