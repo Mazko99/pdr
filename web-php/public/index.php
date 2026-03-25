@@ -719,7 +719,6 @@ $isAdminUi = !empty($_SESSION['is_admin']) && $_SESSION['is_admin'] === true;
       <div class="container">
         <h2 class="h2">Процес підготовки в ProstoPDR</h2>
         <div class="video-review">
-        <div class="video-review">
   <div class="video-review__card">
     <h3 class="big-step__title video-review__title">Відеоогляд платформи</h3>
 
