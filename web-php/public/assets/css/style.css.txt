@@ -1867,13 +1867,16 @@ button.pp-btn--darkfix:active{
     color:#ffffff !important;
     -webkit-text-fill-color:#ffffff !important;
 }
-/* ===== Video review block ===== */
+/* ===== BIG YOUTUBE VIDEO BLOCK ===== */
 .video-review {
-  margin: 24px 0 34px;
+  width: 100%;
+  margin: 24px 0 40px;
 }
 
 .video-review__card {
   width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
   border-radius: 36px;
   padding: 28px;
   background:
@@ -1884,22 +1887,37 @@ button.pp-btn--darkfix:active{
 }
 
 .video-review__title {
-  margin: 0 0 20px;
+  margin: 0 0 18px;
 }
 
-.video-review__player {
-  width: 100%;
+.video-review__player,
+.video-review__player--youtube {
+  display: block;
+  width: 100% !important;
+  max-width: 100% !important;
   overflow: hidden;
   border-radius: 28px;
   background: #000;
   box-shadow: 0 18px 40px rgba(0, 0, 0, .14);
 }
 
-.video-review__player--youtube iframe {
-  display: block;
-  width: 100%;
-  height: clamp(280px, 52vw, 720px);
-  border: 0;
+.video-review__player--youtube iframe,
+.video-review iframe {
+  display: block !important;
+  width: 100% !important;
+  min-width: 100% !important;
+  max-width: 100% !important;
+  height: auto !important;
+  aspect-ratio: 16 / 9 !important;
+  border: 0 !important;
+}
+
+/* Якщо раптом YouTube або твій HTML задає width/height атрибутами */
+.video-review iframe[width],
+.video-review iframe[height] {
+  width: 100% !important;
+  height: auto !important;
+  aspect-ratio: 16 / 9 !important;
 }
 
 @media (max-width: 991px) {
@@ -1908,18 +1926,15 @@ button.pp-btn--darkfix:active{
     padding: 20px;
   }
 
-  .video-review__player {
+  .video-review__player,
+  .video-review__player--youtube {
     border-radius: 22px;
-  }
-
-  .video-review__player--youtube iframe {
-    height: clamp(240px, 56vw, 520px);
   }
 }
 
 @media (max-width: 767px) {
   .video-review {
-    margin: 18px 0 26px;
+    margin: 18px 0 28px;
   }
 
   .video-review__card {
@@ -1931,11 +1946,8 @@ button.pp-btn--darkfix:active{
     margin-bottom: 14px;
   }
 
-  .video-review__player {
+  .video-review__player,
+  .video-review__player--youtube {
     border-radius: 18px;
-  }
-
-  .video-review__player--youtube iframe {
-    height: clamp(220px, 58vw, 340px);
   }
 }
