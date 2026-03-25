@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../../src/bootstrap.php';
 // users_store.php тут не обов’язковий, але можна лишити (він не шкодить)
 require_once __DIR__ . '/../../src/users_store.php';
+require_once __DIR__ . '/../../src/ref_store.php';
 
 // ✅ Якщо вже залогінений — в кабінет (і все)
 if (auth_user_id()) {
@@ -29,6 +30,25 @@ if ($err === '' && $ok === '' && $reason !== '') {
   } elseif ($reason === 'max_devices') {
     $err = 'Ліміт пристроїв вичерпано. До одного акаунта можна підключити максимум 2 пристрої.';
   }
+}
+
+ref_ensure_schema();
+
+$pendingRefCode = isset($_SESSION['pending_ref_code']) && is_string($_SESSION['pending_ref_code'])
+  ? trim((string)$_SESSION['pending_ref_code'])
+  : '';
+
+$googleHref = '/auth/google/start.php';
+$googleQs = [];
+
+if ($pendingRefCode !== '') {
+  $googleQs['ref'] = $pendingRefCode;
+}
+if ($nextSafe !== '') {
+  $googleQs['next'] = $nextSafe;
+}
+if ($googleQs) {
+  $googleHref .= '?' . http_build_query($googleQs);
 }
 
 $csrf = csrf_token();

@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../../src/bootstrap.php';
 require_once __DIR__ . '/../../src/users_store.php';
+require_once __DIR__ . '/../../src/ref_store.php';
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
   http_response_code(405);
@@ -17,11 +18,19 @@ $pass  = (string)($_POST['password'] ?? '');
 $name  = trim((string)($_POST['name'] ?? ''));
 $pass2 = (string)($_POST['password_confirm'] ?? '');
 $next  = trim((string)($_POST['next'] ?? ''));
+$refCode = trim((string)($_POST['ref_code'] ?? ''));
 
 // safe next (тільки внутрішні шляхи)
 $nextSafe = '';
 if ($next !== '' && str_starts_with($next, '/')) {
   $nextSafe = $next;
+}
+
+// якщо прийшов ref_code з форми — ще раз фіксуємо його в сесії
+// це безпечно і допомагає не втратити реф при реєстрації
+ref_ensure_schema();
+if ($refCode !== '') {
+  ref_capture_code_from_request($refCode);
 }
 
 if ($email === '' || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
@@ -32,6 +41,7 @@ if ($mode === 'register') {
   if (strlen($pass) < 8) {
     redirect('/login?tab=register&err=' . rawurlencode('Пароль має бути мінімум 8 символів'));
   }
+
   if ($pass !== $pass2) {
     redirect('/login?tab=register&err=' . rawurlencode('Паролі не співпадають'));
   }
@@ -43,6 +53,10 @@ if ($mode === 'register') {
 
   $hash = password_hash($pass, PASSWORD_DEFAULT);
   $uid = (string)user_create($email, $name, $hash);
+
+  // прив’язуємо нового користувача до referral account,
+  // якщо перед цим був перехід по реф-ссилці
+  ref_attach_new_user($uid);
 
   auth_login($uid);
 
