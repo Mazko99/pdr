@@ -719,22 +719,13 @@ $isAdminUi = !empty($_SESSION['is_admin']) && $_SESSION['is_admin'] === true;
       <div class="container">
         <h2 class="h2">Процес підготовки в ProstoPDR</h2>
         <div class="video-review">
+        <div class="video-review">
   <div class="video-review__card">
-    <div class="video-review__head">
-      <div>
-        <h3 class="big-step__title video-review__title">Відеоогляд платформи</h3>
-        <p class="lead video-review__text">
-          Подивись короткий огляд ProstoPDR: як виглядає кабінет, як проходять тести,
-          де видно пояснення, помилки та статистику прогресу.
-        </p>
-      </div>
-
-      <div class="video-review__badge">Огляд</div>
-    </div>
+    <h3 class="big-step__title video-review__title">Відеоогляд платформи</h3>
 
     <div class="video-review__player video-review__player--youtube">
       <iframe
-        src="https://www.youtube-nocookie.com/embed/IcZ9d8FE54Y?rel=0&modestbranding=1&playsinline=1"
+        src="https://www.youtube-nocookie.com/embed/NqtdBq9Yc_8?rel=0&modestbranding=1&playsinline=1"
         title="Відеоогляд платформи ProstoPDR"
         loading="lazy"
         allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
