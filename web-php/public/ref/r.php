@@ -6,11 +6,16 @@ require_once __DIR__ . '/../src/ref_store.php';
 
 ref_ensure_schema();
 
-$code = $_GET['c'] ?? $_GET['ref'] ?? '';
-if (ref_capture_code_from_request((string)$code)) {
-    header('Location: /login');
+$code = strtoupper(trim((string)($_GET['c'] ?? $_GET['ref'] ?? '')));
+
+if ($code !== '') {
+    // пробуємо зберегти в сесію
+    ref_capture_code_from_request($code);
+
+    // і дублюємо в URL, щоб точно не втратити
+    header('Location: /login?ref=' . rawurlencode($code));
     exit;
 }
 
-header('Location: /');
+header('Location: /login');
 exit;

@@ -10,9 +10,12 @@ require_once __DIR__ . '/../../src/ref_store.php';
 if (auth_user_id()) {
   redirect('/account');
 }
+
 $next = isset($_GET['next']) ? (string)$_GET['next'] : '';
 $nextSafe = '';
-if ($next !== '' && str_starts_with($next, '/')) $nextSafe = $next;
+if ($next !== '' && str_starts_with($next, '/')) {
+  $nextSafe = $next;
+}
 
 /**
  * ✅ Повідомлення:
@@ -20,6 +23,13 @@ if ($next !== '' && str_starts_with($next, '/')) $nextSafe = $next;
  * - ?reason=max_devices
  */
 $reason = isset($_GET['reason']) ? (string)$_GET['reason'] : '';
+
+// ✅ Якщо прийшли по /login?ref=CODE — зберігаємо код у сесію
+$refFromGet = isset($_GET['ref']) ? trim((string)$_GET['ref']) : '';
+if ($refFromGet !== '') {
+  ref_ensure_schema();
+  ref_capture_code_from_request($refFromGet);
+}
 
 $err = isset($_GET['err']) ? (string)$_GET['err'] : '';
 $ok  = isset($_GET['ok']) ? (string)$_GET['ok'] : '';
@@ -32,12 +42,14 @@ if ($err === '' && $ok === '' && $reason !== '') {
   }
 }
 
+// ✅ Читаємо pending ref code із сесії
 ref_ensure_schema();
 
 $pendingRefCode = isset($_SESSION['pending_ref_code']) && is_string($_SESSION['pending_ref_code'])
   ? trim((string)$_SESSION['pending_ref_code'])
   : '';
 
+// ✅ Формуємо Google OAuth посилання з ref/next
 $googleHref = '/auth/google/start.php';
 $googleQs = [];
 
@@ -137,8 +149,22 @@ $csrf = csrf_token();
       font-weight: 750;
       color: rgba(11,27,20,.74);
     }
-    .notice--err{ background: rgba(255, 70, 70, .06); border-color: rgba(255, 70, 70, .22); }
-    .notice--ok{ background: rgba(22,163,74,.08); border-color: rgba(22,163,74,.22); }
+    .notice--err{
+      background: rgba(255, 70, 70, .06);
+      border-color: rgba(255, 70, 70, .22);
+    }
+    .notice--ok{
+      background: rgba(22,163,74,.08);
+      border-color: rgba(22,163,74,.22);
+    }
+    .notice--ref{
+      background: rgba(14,122,67,.08);
+      border-color: rgba(14,122,67,.22);
+      color: rgba(11,27,20,.82);
+    }
+    .notice--ref strong{
+      color: var(--green-dark);
+    }
 
     .auth-side{
       border-radius: var(--radius);
@@ -233,8 +259,17 @@ $csrf = csrf_token();
       <?php if ($err): ?>
         <div class="notice notice--err"><?php echo htmlspecialchars($err, ENT_QUOTES, 'UTF-8'); ?></div>
       <?php endif; ?>
+
       <?php if ($ok): ?>
         <div class="notice notice--ok"><?php echo htmlspecialchars($ok, ENT_QUOTES, 'UTF-8'); ?></div>
+      <?php endif; ?>
+
+      <?php if ($pendingRefCode !== ''): ?>
+        <div class="notice notice--ref">
+          Ти перейшов за партнерським посиланням.
+          Код партнера: <strong><?php echo htmlspecialchars($pendingRefCode, ENT_QUOTES, 'UTF-8'); ?></strong>.
+          Після реєстрації акаунт буде прикріплено автоматично.
+        </div>
       <?php endif; ?>
 
       <div class="auth-wrap">
@@ -250,6 +285,14 @@ $csrf = csrf_token();
           <form method="post" action="/auth/email.php" id="authForm" novalidate>
             <input type="hidden" name="csrf" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
             <input type="hidden" name="mode" value="login" id="mode">
+
+            <?php if ($nextSafe !== ''): ?>
+              <input type="hidden" name="next" value="<?php echo htmlspecialchars($nextSafe, ENT_QUOTES, 'UTF-8'); ?>">
+            <?php endif; ?>
+
+            <?php if ($pendingRefCode !== ''): ?>
+              <input type="hidden" name="ref_code" value="<?php echo htmlspecialchars($pendingRefCode, ENT_QUOTES, 'UTF-8'); ?>">
+            <?php endif; ?>
 
             <div class="field" id="nameField" style="display:none;">
               <div class="label">Імʼя (необовʼязково)</div>
@@ -278,7 +321,7 @@ $csrf = csrf_token();
 
           <div class="oauth-sep">або</div>
           <div class="row">
-            <a class="btn-oauth" href="/auth/google/start.php" aria-label="Увійти через Google">
+            <a class="btn-oauth" href="<?php echo htmlspecialchars($googleHref, ENT_QUOTES, 'UTF-8'); ?>" aria-label="Увійти через Google">
               <svg class="btn-oauth__icon" viewBox="0 0 48 48" aria-hidden="true">
                 <path fill="#FFC107" d="M43.611 20.083H42V20H24v8h11.303C33.652 32.659 29.215 36 24 36c-6.627 0-12-5.373-12-12s5.373-12 12-12c3.059 0 5.842 1.154 7.957 3.043l5.657-5.657C34.046 6.053 29.268 4 24 4 12.955 4 4 12.955 4 24s8.955 20 20 20 20-8.955 20-20c0-1.341-.138-2.65-.389-3.917z"/>
                 <path fill="#FF3D00" d="M6.306 14.691l6.571 4.819C14.655 16.108 19.001 12 24 12c3.059 0 5.842 1.154 7.957 3.043l5.657-5.657C34.046 6.053 29.268 4 24 4c-7.682 0-14.39 4.326-17.694 10.691z"/>
