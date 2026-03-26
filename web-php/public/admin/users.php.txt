@@ -7,21 +7,30 @@ require_once __DIR__ . '/../../src/chat_store.php';
 
 if (session_status() !== PHP_SESSION_ACTIVE) @session_start();
 
-function h($v): string { return htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8'); }
+function h($v): string {
+  return htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8');
+}
 
 function fmt(?string $iso): string {
   $iso = trim((string)$iso);
   if ($iso === '' || strtolower($iso) === 'null') return '—';
-  return $iso;
+
+  try {
+    $dt = new DateTimeImmutable($iso);
+    $dt = $dt->setTimezone(new DateTimeZone('Europe/Kyiv'));
+    return $dt->format('Y-m-d H:i:s');
+  } catch (Throwable $e) {
+    return $iso;
+  }
 }
 
 /**
- * ✅ Беремо користувачів з Postgres через users_store.php
+ * Беремо користувачів з Postgres через users_store.php
  */
 $users = users_all();
 
 /**
- * ✅ Пошук як був (id/email/name)
+ * Пошук як був (id/email/name)
  */
 $q = trim((string)($_GET['q'] ?? ''));
 if ($q !== '') {
@@ -49,10 +58,10 @@ $unreadTotal = chat_admin_unread_total();
   <link rel="stylesheet" href="/assets/css/style.css?v=4" />
 
   <style>
-    .admin-wrap{max-width:1200px;margin:0 auto;padding:16px;}
+    .admin-wrap{max-width:1380px;margin:0 auto;padding:16px;}
     .admin-top{display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap}
     .admin-actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
-    .admin-table{width:100%;border-collapse:collapse;min-width:920px}
+    .admin-table{width:100%;border-collapse:collapse;min-width:1180px}
     .admin-table th,.admin-table td{padding:12px 12px;border-bottom:1px solid rgba(11,27,20,.08);text-align:left;white-space:nowrap}
     .admin-table th{font-weight:900}
     .admin-card{overflow:auto}
@@ -98,6 +107,7 @@ $unreadTotal = chat_admin_unread_total();
             <th>Ім’я</th>
             <th>Email</th>
             <th>Plan</th>
+            <th>Paid at</th>
             <th>Expires</th>
             <th>Created</th>
             <th></th>
@@ -110,6 +120,7 @@ $unreadTotal = chat_admin_unread_total();
               <td><?= h((string)($u['name'] ?? '')) ?></td>
               <td><?= h((string)($u['email'] ?? '')) ?></td>
               <td><span class="pill"><?= h((string)($u['plan'] ?? 'free')) ?></span></td>
+              <td class="muted"><?= h(fmt((string)($u['paid_at'] ?? ''))) ?></td>
               <td class="muted"><?= h(fmt((string)($u['expires_at'] ?? ''))) ?></td>
               <td class="muted"><?= h(fmt((string)($u['created_at'] ?? ''))) ?></td>
               <td style="display:flex; gap:10px; align-items:center;">
@@ -120,7 +131,7 @@ $unreadTotal = chat_admin_unread_total();
           <?php endforeach; ?>
 
           <?php if (empty($users)): ?>
-            <tr><td colspan="7" class="muted">Нічого не знайдено.</td></tr>
+            <tr><td colspan="8" class="muted">Нічого не знайдено.</td></tr>
           <?php endif; ?>
         </tbody>
       </table>

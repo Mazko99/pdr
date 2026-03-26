@@ -8,20 +8,21 @@ declare(strict_types=1);
  * To avoid "Cannot redeclare db()", we declare db() only if it's not declared yet.
  *
  * Supports:
- * - DATABASE_URL (Railway style)  OR
- * - PHP_DB_HOST/PORT/NAME/USER/PASS (+ PHP_DB_DRIVER=pgsql)
+ * - DATABASE_URL (Railway style)
+ * - or PHP_DB_HOST / PHP_DB_PORT / PHP_DB_NAME / PHP_DB_USER / PHP_DB_PASS
+ * - fallback to PGHOST / PGPORT / PGDATABASE / PGUSER / PGPASSWORD
  */
 
 if (!function_exists('db')) {
 
   function db(): PDO {
     static $pdo = null;
-    if ($pdo instanceof PDO) return $pdo;
+    if ($pdo instanceof PDO) {
+      return $pdo;
+    }
 
-    // 1) Railway standard env
     $databaseUrl = (string)(getenv('DATABASE_URL') ?: '');
 
-    // 2) Custom envs (your style)
     $driver = (string)(getenv('PHP_DB_DRIVER') ?: 'pgsql');
 
     $host = (string)(getenv('PHP_DB_HOST') ?: '');
@@ -35,18 +36,15 @@ if (!function_exists('db')) {
     $dsnPass = '';
 
     if ($databaseUrl !== '') {
-      // Example: postgres://user:pass@host:port/dbname
       $parts = parse_url($databaseUrl);
       if (!is_array($parts)) {
         throw new RuntimeException('Invalid DATABASE_URL');
       }
 
-      $h = (string)($parts['host'] ?? '');
-      $p = (string)($parts['port'] ?? '5432');
-      $db = (string)($parts['path'] ?? '');
-      $db = ltrim($db, '/');
-
-      $u = (string)($parts['user'] ?? '');
+      $h  = (string)($parts['host'] ?? '');
+      $p  = (string)($parts['port'] ?? '5432');
+      $db = ltrim((string)($parts['path'] ?? ''), '/');
+      $u  = (string)($parts['user'] ?? '');
       $pw = (string)($parts['pass'] ?? '');
 
       if ($h === '' || $db === '') {
@@ -61,7 +59,6 @@ if (!function_exists('db')) {
         throw new RuntimeException('Set PHP_DB_DRIVER=pgsql (or set DATABASE_URL)');
       }
 
-      // allow Railway PG* variables if you used references but named differently
       if ($host === '') $host = (string)(getenv('PGHOST') ?: '127.0.0.1');
       if ($port === '') $port = (string)(getenv('PGPORT') ?: '5432');
       if ($name === '') $name = (string)(getenv('PGDATABASE') ?: 'app');
@@ -76,14 +73,25 @@ if (!function_exists('db')) {
     $pdo = new PDO($dsn, $dsnUser, $dsnPass, [
       PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
       PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+      PDO::ATTR_EMULATE_PREPARES => false,
     ]);
 
+    try {
+      $pdo->exec("SET TIME ZONE 'UTC'");
+    } catch (Throwable $e) {
+      // ignore
+    }
+
     ensure_schema($pdo);
+
     return $pdo;
   }
 
+  function pdoi(): PDO {
+    return db();
+  }
+
   function ensure_schema(PDO $pdo): void {
-    // Base table
     $pdo->exec("
       CREATE TABLE IF NOT EXISTS users (
         id TEXT PRIMARY KEY,
@@ -107,10 +115,9 @@ if (!function_exists('db')) {
       );
     ");
 
-    // If you already had an old users table, safely add missing columns
     $cols = [
       "password_hash VARCHAR(255)",
-      "google_sub VARCHAR(255) UNIQUE",
+      "google_sub VARCHAR(255)",
       "plan VARCHAR(50) NOT NULL DEFAULT 'free'",
       "expires_at TIMESTAMPTZ NULL",
       "trial_used BOOLEAN NOT NULL DEFAULT FALSE",
@@ -127,72 +134,93 @@ if (!function_exists('db')) {
     ];
 
     foreach ($cols as $def) {
-      // extract column name
-      $name = preg_split('/\s+/', trim($def))[0] ?? '';
-      if ($name === '') continue;
+      $col = preg_split('/\s+/', trim($def))[0] ?? '';
+      if ($col === '') continue;
+
       try {
         $pdo->exec("ALTER TABLE users ADD COLUMN IF NOT EXISTS {$def};");
       } catch (Throwable $e) {
-        // ignore (some defs like UNIQUE may fail if column exists differently)
+        // ignore
       }
+    }
+
+    try {
+      $pdo->exec("CREATE INDEX IF NOT EXISTS idx_users_created_at ON users (created_at DESC);");
+    } catch (Throwable $e) {
+      // ignore
+    }
+
+    try {
+      $pdo->exec("CREATE INDEX IF NOT EXISTS idx_users_paid_at ON users (paid_at DESC);");
+    } catch (Throwable $e) {
+      // ignore
+    }
+
+    try {
+      $pdo->exec("CREATE INDEX IF NOT EXISTS idx_users_expires_at ON users (expires_at DESC);");
+    } catch (Throwable $e) {
+      // ignore
     }
   }
 
-  // --- simple queries you can use in users_store.php ---
-
   function db_find_user_by_id(PDO $pdo, string $id): ?array {
     $st = $pdo->prepare("SELECT * FROM users WHERE id = :id LIMIT 1");
-    $st->execute(['id' => $id]);
+    $st->execute([':id' => $id]);
     $row = $st->fetch();
-    return $row ?: null;
+    return is_array($row) ? $row : null;
   }
 
   function db_find_user_by_email(PDO $pdo, string $email): ?array {
-    $st = $pdo->prepare("SELECT * FROM users WHERE email = :email LIMIT 1");
-    $st->execute(['email' => $email]);
+    $st = $pdo->prepare("SELECT * FROM users WHERE LOWER(email) = LOWER(:email) LIMIT 1");
+    $st->execute([':email' => $email]);
     $row = $st->fetch();
-    return $row ?: null;
+    return is_array($row) ? $row : null;
   }
 
   function db_find_user_by_google_sub(PDO $pdo, string $sub): ?array {
     $st = $pdo->prepare("SELECT * FROM users WHERE google_sub = :sub LIMIT 1");
-    $st->execute(['sub' => $sub]);
+    $st->execute([':sub' => $sub]);
     $row = $st->fetch();
-    return $row ?: null;
+    return is_array($row) ? $row : null;
+  }
+
+  function db_all_users(PDO $pdo): array {
+    $st = $pdo->query("
+      SELECT
+        id, email, name, password_hash, google_sub,
+        plan, expires_at,
+        trial_used, trial_started_at, trial_expires_at, trial_cancelled,
+        paid_at, plan_set_at, mono_last_payment_at,
+        buy_pending_invoice, buy_pending_plan, trial_pending_plan,
+        created_at
+      FROM users
+      ORDER BY created_at DESC NULLS LAST, id DESC
+    ");
+    $rows = $st->fetchAll();
+    return is_array($rows) ? $rows : [];
   }
 
   function db_upsert_user(PDO $pdo, array $u): void {
-    // expects $u['id'] present
     $id = (string)($u['id'] ?? '');
-    if ($id === '') throw new RuntimeException('db_upsert_user: missing id');
-
-    // normalize known fields
-    $fields = [
-      'id','email','name','password_hash','google_sub',
-      'plan','expires_at',
-      'trial_used','trial_started_at','trial_expires_at','trial_cancelled',
-      'paid_at','plan_set_at','mono_last_payment_at',
-      'buy_pending_invoice','buy_pending_plan','trial_pending_plan'
-    ];
-
-    $data = [];
-    foreach ($fields as $f) {
-      $data[$f] = $u[$f] ?? null;
+    if ($id === '') {
+      throw new RuntimeException('db_upsert_user: missing id');
     }
 
     $sql = "
       INSERT INTO users (
-        id,email,name,password_hash,google_sub,
-        plan,expires_at,
-        trial_used,trial_started_at,trial_expires_at,trial_cancelled,
-        paid_at,plan_set_at,mono_last_payment_at,
-        buy_pending_invoice,buy_pending_plan,trial_pending_plan
+        id, email, name, password_hash, google_sub,
+        plan, expires_at,
+        trial_used, trial_started_at, trial_expires_at, trial_cancelled,
+        paid_at, plan_set_at, mono_last_payment_at,
+        buy_pending_invoice, buy_pending_plan, trial_pending_plan,
+        created_at
       ) VALUES (
-        :id,:email,:name,:password_hash,:google_sub,
-        :plan,:expires_at,
-        :trial_used,:trial_started_at,:trial_expires_at,:trial_cancelled,
-        :paid_at,:plan_set_at,:mono_last_payment_at,
-        :buy_pending_invoice,:buy_pending_plan,:trial_pending_plan
+        :id, :email, :name, :password_hash, :google_sub,
+        :plan, :expires_at,
+        :trial_used, :trial_started_at, :trial_expires_at, :trial_cancelled,
+        :paid_at, :plan_set_at, :mono_last_payment_at,
+        :buy_pending_invoice, :buy_pending_plan, :trial_pending_plan,
+        :created_at
       )
       ON CONFLICT (id) DO UPDATE SET
         email = EXCLUDED.email,
@@ -214,7 +242,36 @@ if (!function_exists('db')) {
     ";
 
     $st = $pdo->prepare($sql);
-    $st->execute($data);
+    $st->execute([
+      ':id' => $u['id'],
+      ':email' => $u['email'] !== '' ? $u['email'] : null,
+      ':name' => $u['name'] !== '' ? $u['name'] : null,
+      ':password_hash' => $u['password_hash'] !== '' ? $u['password_hash'] : null,
+      ':google_sub' => $u['google_sub'] ?? null,
+
+      ':plan' => $u['plan'] ?? 'free',
+      ':expires_at' => $u['expires_at'] ?? null,
+
+      ':trial_used' => $u['trial_used'] ?? false,
+      ':trial_started_at' => $u['trial_started_at'] ?? null,
+      ':trial_expires_at' => $u['trial_expires_at'] ?? null,
+      ':trial_cancelled' => $u['trial_cancelled'] ?? false,
+
+      ':paid_at' => $u['paid_at'] ?? null,
+      ':plan_set_at' => $u['plan_set_at'] ?? null,
+      ':mono_last_payment_at' => $u['mono_last_payment_at'] ?? null,
+
+      ':buy_pending_invoice' => $u['buy_pending_invoice'] ?? null,
+      ':buy_pending_plan' => $u['buy_pending_plan'] ?? null,
+      ':trial_pending_plan' => $u['trial_pending_plan'] ?? null,
+
+      ':created_at' => $u['created_at'] ?? gmdate('c'),
+    ]);
   }
 
+  function db_delete_user(PDO $pdo, string $id): bool {
+    $st = $pdo->prepare("DELETE FROM users WHERE id = :id");
+    $st->execute([':id' => $id]);
+    return $st->rowCount() > 0;
+  }
 }
