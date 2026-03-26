@@ -20,14 +20,11 @@ $pass2 = (string)($_POST['password_confirm'] ?? '');
 $next  = trim((string)($_POST['next'] ?? ''));
 $refCode = trim((string)($_POST['ref_code'] ?? ''));
 
-// safe next (тільки внутрішні шляхи)
 $nextSafe = '';
 if ($next !== '' && str_starts_with($next, '/')) {
   $nextSafe = $next;
 }
 
-// якщо прийшов ref_code з форми — ще раз фіксуємо його в сесії
-// це безпечно і допомагає не втратити реф при реєстрації
 ref_ensure_schema();
 if ($refCode !== '') {
   ref_capture_code_from_request($refCode);
@@ -54,13 +51,10 @@ if ($mode === 'register') {
   $hash = password_hash($pass, PASSWORD_DEFAULT);
   $uid = (string)user_create($email, $name, $hash);
 
-  // прив’язуємо нового користувача до referral account,
-  // якщо перед цим був перехід по реф-ссилці
   ref_attach_new_user($uid);
 
   auth_login($uid);
 
-  // device policy
   if (function_exists('ds_on_login')) {
     $res = ds_on_login($uid, session_id(), 2);
     if (!($res['ok'] ?? false)) {
@@ -69,7 +63,6 @@ if ($mode === 'register') {
     }
   }
 
-  // session list (якщо є)
   if (function_exists('session_register_current')) {
     session_register_current($uid, 'Email register');
   }
@@ -79,7 +72,6 @@ if ($mode === 'register') {
   redirect($nextSafe !== '' ? $nextSafe : '/account/index.php');
 }
 
-// -------------------- LOGIN --------------------
 if ($pass === '') {
   redirect('/login?err=' . rawurlencode('Введи пароль'));
 }
@@ -96,7 +88,6 @@ if (!user_verify_password($user, $pass)) {
 $uid = (string)$user['id'];
 auth_login($uid);
 
-// device policy
 if (function_exists('ds_on_login')) {
   $res = ds_on_login($uid, session_id(), 2);
   if (!($res['ok'] ?? false)) {

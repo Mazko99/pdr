@@ -9,10 +9,7 @@ ref_ensure_schema();
 $code = strtoupper(trim((string)($_GET['c'] ?? $_GET['ref'] ?? '')));
 
 if ($code !== '') {
-    // пробуємо зберегти в сесію
     ref_capture_code_from_request($code);
-
-    // і дублюємо в URL, щоб точно не втратити
     header('Location: /login?ref=' . rawurlencode($code));
     exit;
 }

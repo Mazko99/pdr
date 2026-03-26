@@ -4,8 +4,8 @@ declare(strict_types=1);
 require __DIR__ . '/../../../src/bootstrap.php';
 require __DIR__ . '/../../../src/users_store.php';
 require __DIR__ . '/../../../src/oauth_store.php';
+require __DIR__ . '/../../../src/ref_store.php';
 
-// bootstrap вже стартує сесію, але лишимо безпечно
 if (session_status() !== PHP_SESSION_ACTIVE) {
   session_start();
 }
@@ -17,7 +17,6 @@ if ($code === '' || $state === '') {
   redirect('/login?err=' . rawurlencode('Google login canceled'));
 }
 
-// CSRF state check
 $expected = (string)($_SESSION['oauth_state_google'] ?? '');
 unset($_SESSION['oauth_state_google']);
 
@@ -32,15 +31,26 @@ if ($clientId === '' || $secret === '') {
   redirect('/login?err=' . rawurlencode('Google OAuth not configured'));
 }
 
-/**
- * ✅ redirect_uri MUST match what was used in start.php.
- * Робимо канонічно HTTPS + без www (як у start.php, який я тобі давав)
- */
 $host = (string)($_SERVER['HTTP_HOST'] ?? 'prostopdr.com');
 $host = preg_replace('/^www\./i', '', $host);
 $redirectUri = 'https://' . $host . '/auth/google/callback.php';
 
-// ---- обмен code -> token
+ref_ensure_schema();
+
+$pendingGoogleRef = isset($_SESSION['oauth_google_ref_code']) && is_string($_SESSION['oauth_google_ref_code'])
+  ? strtoupper(trim((string)$_SESSION['oauth_google_ref_code']))
+  : '';
+
+$pendingGoogleNext = isset($_SESSION['oauth_google_next']) && is_string($_SESSION['oauth_google_next'])
+  ? trim((string)$_SESSION['oauth_google_next'])
+  : '';
+
+unset($_SESSION['oauth_google_ref_code'], $_SESSION['oauth_google_next']);
+
+if ($pendingGoogleRef !== '') {
+  ref_capture_code_from_request($pendingGoogleRef);
+}
+
 $token = http_post_form('https://oauth2.googleapis.com/token', [
   'code' => $code,
   'client_id' => $clientId,
@@ -58,7 +68,6 @@ if ($accessToken === '') {
   redirect('/login?err=' . rawurlencode('Google token error'));
 }
 
-// ---- get profile (userinfo)
 $info = http_get_json('https://openidconnect.googleapis.com/v1/userinfo', [
   'Authorization: Bearer ' . $accessToken,
 ]);
@@ -77,40 +86,34 @@ if ($email === '' || $sub === '') {
 
 $emailNorm = strtolower(trim($email));
 
-// 1) if already linked by sub -> login
 $link = oauth_find('google', $sub);
 if (is_array($link) && !empty($link['user_id'])) {
   $uid = (string)$link['user_id'];
-  complete_login_google($uid, $emailNorm, $name);
+  complete_login_google($uid, $pendingGoogleNext);
 }
 
-// 2) else: if user exists by email -> link and login
 $u = user_find_by_email($emailNorm);
 if (is_array($u) && !empty($u['id'])) {
   $uid = (string)$u['id'];
   oauth_link('google', $sub, $uid, $emailNorm, $name);
-  complete_login_google($uid, $emailNorm, $name);
+  complete_login_google($uid, $pendingGoogleNext);
 }
 
-// 3) else: create new user + link + login
 $hash = password_hash(bin2hex(random_bytes(16)), PASSWORD_DEFAULT);
-$newId = user_create($emailNorm, $name, $hash);
-oauth_link('google', $sub, (string)$newId, $emailNorm, $name);
-complete_login_google((string)$newId, $emailNorm, $name);
+$newId = (string)user_create($emailNorm, $name, $hash);
 
+oauth_link('google', $sub, $newId, $emailNorm, $name);
+ref_attach_new_user($newId);
 
-// ================= HELPERS =================
+complete_login_google($newId, $pendingGoogleNext);
 
-function complete_login_google(string $uid, string $email, string $name): void {
-  // auth session
+function complete_login_google(string $uid, string $nextSafe = ''): void {
   auth_login($uid);
 
-  // ✅ sessions.json (для адмінки/безпеки)
   if (function_exists('session_register_current')) {
     session_register_current($uid, 'Google login');
   }
 
-  // ✅ Device policy (2 remembered + 1 active)
   if (function_exists('ds_on_login')) {
     $sid = session_status() === PHP_SESSION_ACTIVE ? session_id() : '';
     if ($sid !== '') {
@@ -122,8 +125,11 @@ function complete_login_google(string $uid, string $email, string $name): void {
     }
   }
 
-  // access
   auth_refresh_access();
+
+  if ($nextSafe !== '' && str_starts_with($nextSafe, '/')) {
+    redirect($nextSafe);
+  }
 
   redirect('/account/index.php');
 }
@@ -141,7 +147,10 @@ function http_post_form(string $url, array $fields): ?array {
   $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
   curl_close($ch);
 
-  if (!is_string($out) || $code < 200 || $code >= 300) return null;
+  if (!is_string($out) || $code < 200 || $code >= 300) {
+    return null;
+  }
+
   $json = json_decode($out, true);
   return is_array($json) ? $json : null;
 }
@@ -158,7 +167,10 @@ function http_get_json(string $url, array $headers = []): ?array {
   $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
   curl_close($ch);
 
-  if (!is_string($out) || $code < 200 || $code >= 300) return null;
+  if (!is_string($out) || $code < 200 || $code >= 300) {
+    return null;
+  }
+
   $json = json_decode($out, true);
   return is_array($json) ? $json : null;
 }

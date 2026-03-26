@@ -2,8 +2,8 @@
 declare(strict_types=1);
 
 require __DIR__ . '/../../../src/bootstrap.php';
+require __DIR__ . '/../../../src/ref_store.php';
 
-// bootstrap вже стартує сесію, але залишимо безпечно
 if (session_status() !== PHP_SESSION_ACTIVE) {
   session_start();
 }
@@ -14,17 +14,30 @@ if ($clientId === '') {
   exit('Google OAuth is not configured: GOOGLE_CLIENT_ID is empty');
 }
 
-// ✅ Канонічний хост: без www
+$ref = strtoupper(trim((string)($_GET['ref'] ?? '')));
+$next = trim((string)($_GET['next'] ?? ''));
+
+ref_ensure_schema();
+
+if ($ref !== '') {
+  ref_capture_code_from_request($ref);
+  $_SESSION['oauth_google_ref_code'] = $ref;
+} else {
+  unset($_SESSION['oauth_google_ref_code']);
+}
+
+if ($next !== '' && str_starts_with($next, '/')) {
+  $_SESSION['oauth_google_next'] = $next;
+} else {
+  unset($_SESSION['oauth_google_next']);
+}
+
 $host = (string)($_SERVER['HTTP_HOST'] ?? 'prostopdr.com');
 $host = preg_replace('/^www\./i', '', $host);
 
-// ✅ Канонічний протокол: HTTPS (Railway/Cloudflare)
 $proto = 'https';
-
-// ✅ Redirect URI рахуємо самі, щоб не було http/https mismatch
 $redirect = $proto . '://' . $host . '/auth/google/callback.php';
 
-// CSRF state
 $state = bin2hex(random_bytes(16));
 $_SESSION['oauth_state_google'] = $state;
 

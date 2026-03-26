@@ -2,11 +2,9 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/../../src/bootstrap.php';
-// users_store.php тут не обов’язковий, але можна лишити (він не шкодить)
 require_once __DIR__ . '/../../src/users_store.php';
 require_once __DIR__ . '/../../src/ref_store.php';
 
-// ✅ Якщо вже залогінений — в кабінет (і все)
 if (auth_user_id()) {
   redirect('/account');
 }
@@ -17,22 +15,16 @@ if ($next !== '' && str_starts_with($next, '/')) {
   $nextSafe = $next;
 }
 
-/**
- * ✅ Повідомлення:
- * - ?reason=another_device
- * - ?reason=max_devices
- */
 $reason = isset($_GET['reason']) ? (string)$_GET['reason'] : '';
-
-// ✅ Якщо прийшли по /login?ref=CODE — зберігаємо код у сесію
-$refFromGet = isset($_GET['ref']) ? trim((string)$_GET['ref']) : '';
-if ($refFromGet !== '') {
-  ref_ensure_schema();
-  ref_capture_code_from_request($refFromGet);
-}
-
 $err = isset($_GET['err']) ? (string)$_GET['err'] : '';
 $ok  = isset($_GET['ok']) ? (string)$_GET['ok'] : '';
+
+$refFromGet = isset($_GET['ref']) ? trim((string)$_GET['ref']) : '';
+ref_ensure_schema();
+
+if ($refFromGet !== '') {
+  ref_capture_code_from_request($refFromGet);
+}
 
 if ($err === '' && $ok === '' && $reason !== '') {
   if ($reason === 'another_device') {
@@ -42,14 +34,10 @@ if ($err === '' && $ok === '' && $reason !== '') {
   }
 }
 
-// ✅ Читаємо pending ref code із сесії
-ref_ensure_schema();
-
 $pendingRefCode = isset($_SESSION['pending_ref_code']) && is_string($_SESSION['pending_ref_code'])
   ? trim((string)$_SESSION['pending_ref_code'])
   : '';
 
-// ✅ Формуємо Google OAuth посилання з ref/next
 $googleHref = '/auth/google/start.php';
 $googleQs = [];
 
@@ -64,7 +52,8 @@ if ($googleQs) {
 }
 
 $csrf = csrf_token();
-?><!doctype html>
+?>
+<!doctype html>
 <html lang="uk">
 <head>
   <meta charset="utf-8" />
@@ -195,7 +184,6 @@ $csrf = csrf_token();
       .auth-wrap{ grid-template-columns: 1fr; }
     }
 
-    /* ✅ OAuth блок */
     .oauth-sep{
       display:flex;
       align-items:center;
@@ -381,7 +369,18 @@ $csrf = csrf_token();
       tabs.forEach(btn => btn.addEventListener('click', () => setTab(btn.dataset.tab)));
 
       const url = new URL(window.location.href);
-      if (url.searchParams.get('tab') === 'register') setTab('register');
+
+      if (url.searchParams.get('tab') === 'register') {
+        setTab('register');
+      }
+
+      if (url.searchParams.get('ref')) {
+        setTab('register');
+      }
+
+      <?php if ($pendingRefCode !== ''): ?>
+      setTab('register');
+      <?php endif; ?>
     })();
   </script>
 </body>
