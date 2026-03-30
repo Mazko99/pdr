@@ -300,51 +300,6 @@ function theory_is_done(string $uid, string $topic): bool {
 
     return false;
 }
-
-function theory_is_done(string $uid, string $topic): bool {
-    if (function_exists('progress_user_get')) {
-        $u = progress_user_get($uid);
-    } else {
-        $u = user_progress_get($uid);
-    }
-
-    if (!is_array($u)) {
-        return false;
-    }
-
-    $td = $u['theory_done'] ?? [];
-    if (!is_array($td)) {
-        return false;
-    }
-
-    $topicKey = trim($topic);
-    $slugKey  = $topicKey !== '' ? slugify_ua($topicKey) : '';
-
-    $check = static function ($val): bool {
-        if (is_bool($val)) {
-            return $val;
-        }
-
-        if (is_array($val)) {
-            if (isset($val['done'])) {
-                return (bool)$val['done'];
-            }
-            return !empty($val);
-        }
-
-        return false;
-    };
-
-    if ($topicKey !== '' && isset($td[$topicKey]) && $check($td[$topicKey])) {
-        return true;
-    }
-
-    if ($slugKey !== '' && isset($td[$slugKey]) && $check($td[$slugKey])) {
-        return true;
-    }
-
-    return false;
-}
 /** -------------------- POST: confirm theory -------------------- */
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     csrf_verify($_POST['csrf'] ?? null);
