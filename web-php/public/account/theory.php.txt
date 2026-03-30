@@ -145,73 +145,7 @@ function user_progress_set(string $uid, array $u): void {
 $topic = trim((string)($_GET['topic'] ?? ''));
 $goTestId = (int)($_GET['go_test_id'] ?? 0);
 
-// ✅ якщо theory підтверджено через done=1 — просто залишаємось на сторінці підтвердження,
-// а запуск тесту робимо вже кнопкою через POST у done-screen
-if ($uid !== '' && $topic !== '' && (string)($_GET['done'] ?? '') === '1') {
-    $topicKey = $topic;
-    $slugKey  = slugify_ua($topicKey);
 
-    if (function_exists('progress_user_get') && function_exists('progress_user_set')) {
-        $u = progress_user_get($uid);
-        if (!is_array($u)) $u = [];
-        if (!isset($u['theory_done']) || !is_array($u['theory_done'])) {
-            $u['theory_done'] = [];
-        }
-
-        $u['theory_done'][$topicKey] = true;
-        if ($slugKey !== '') {
-            $u['theory_done'][$slugKey] = true;
-        }
-
-        progress_user_set($uid, $u);
-    } else {
-        $u = user_progress_get($uid);
-        if (!isset($u['theory_done']) || !is_array($u['theory_done'])) {
-            $u['theory_done'] = [];
-        }
-
-        $u['theory_done'][$topicKey] = true;
-        if ($slugKey !== '') {
-            $u['theory_done'][$slugKey] = true;
-        }
-
-        user_progress_set($uid, $u);
-    }
-}
-
-function theory_is_done(string $uid, string $topic): bool {
-    $u = function_exists('progress_user_get') ? progress_user_get($uid) : user_progress_get($uid);
-    if (!is_array($u)) $u = [];
-
-    $td = $u['theory_done'] ?? [];
-    if (!is_array($td)) return false;
-
-    $topicKey = trim($topic);
-    $slugKey  = $topicKey !== '' ? slugify_ua($topicKey) : '';
-
-    $check = static function ($val): bool {
-        if (is_bool($val)) return $val;
-
-        if (is_array($val)) {
-            if (array_key_exists('done', $val)) {
-                return (bool)$val['done'];
-            }
-            return !empty($val);
-        }
-
-        return false;
-    };
-
-    if ($topicKey !== '' && array_key_exists($topicKey, $td) && $check($td[$topicKey])) {
-        return true;
-    }
-
-    if ($slugKey !== '' && array_key_exists($slugKey, $td) && $check($td[$slugKey])) {
-        return true;
-    }
-
-    return false;
-}
 /** -------------------- Input topic -------------------- */
 $topic = (string)($_GET['topic'] ?? '');
 $topic = trim($topic);
@@ -261,6 +195,111 @@ function first_test_id_for_topic(string $topic): int {
 }
 
 $firstTestId = first_test_id_for_topic($topic);
+
+function theory_mark_done(string $uid, string $topic): void {
+    $topicKey = trim($topic);
+    $slugKey  = $topicKey !== '' ? slugify_ua($topicKey) : '';
+
+    if ($topicKey === '') {
+        return;
+    }
+
+    $now = gmdate('c');
+
+    if (function_exists('progress_user_get') && function_exists('progress_user_set')) {
+        $u = progress_user_get($uid);
+        if (!is_array($u)) {
+            $u = [];
+        }
+
+        if (!isset($u['theory_done']) || !is_array($u['theory_done'])) {
+            $u['theory_done'] = [];
+        }
+
+        $u['theory_done'][$topicKey] = [
+            'done' => true,
+            'done_at' => $now,
+        ];
+
+        if ($slugKey !== '') {
+            $u['theory_done'][$slugKey] = [
+                'done' => true,
+                'done_at' => $now,
+            ];
+        }
+
+        progress_user_set($uid, $u);
+        return;
+    }
+
+    $u = user_progress_get($uid);
+    if (!is_array($u)) {
+        $u = [];
+    }
+
+    if (!isset($u['theory_done']) || !is_array($u['theory_done'])) {
+        $u['theory_done'] = [];
+    }
+
+    $u['theory_done'][$topicKey] = [
+        'done' => true,
+        'done_at' => $now,
+    ];
+
+    if ($slugKey !== '') {
+        $u['theory_done'][$slugKey] = [
+            'done' => true,
+            'done_at' => $now,
+        ];
+    }
+
+    user_progress_set($uid, $u);
+}
+
+function theory_is_done(string $uid, string $topic): bool {
+    if (function_exists('progress_user_get')) {
+        $u = progress_user_get($uid);
+    } else {
+        $u = user_progress_get($uid);
+    }
+
+    if (!is_array($u)) {
+        return false;
+    }
+
+    $td = $u['theory_done'] ?? [];
+    if (!is_array($td)) {
+        return false;
+    }
+
+    $topicKey = trim($topic);
+    $slugKey  = $topicKey !== '' ? slugify_ua($topicKey) : '';
+
+    $check = static function ($val): bool {
+        if (is_bool($val)) {
+            return $val;
+        }
+
+        if (is_array($val)) {
+            if (isset($val['done'])) {
+                return (bool)$val['done'];
+            }
+            return !empty($val);
+        }
+
+        return false;
+    };
+
+    if ($topicKey !== '' && isset($td[$topicKey]) && $check($td[$topicKey])) {
+        return true;
+    }
+
+    if ($slugKey !== '' && isset($td[$slugKey]) && $check($td[$slugKey])) {
+        return true;
+    }
+
+    return false;
+}
 
 function theory_is_done(string $uid, string $topic): bool {
     if (function_exists('progress_user_get')) {
