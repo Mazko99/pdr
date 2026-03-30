@@ -192,51 +192,25 @@ function theory_is_done(string $uid, string $topic): bool {
     $topicKey = trim($topic);
     $slugKey  = $topicKey !== '' ? slugify_ua($topicKey) : '';
 
-    $x = $td[$topicKey] ?? null;
-    if (is_bool($x)) return $x;
-    if (is_array($x)) return !empty($x['done']);
+    // 🔥 ФУНКЦІЯ перевірки
+    $check = function ($val) {
+        if (is_bool($val)) return $val;
+        if (is_array($val)) {
+            if (isset($val['done'])) return (bool)$val['done'];
+            return !empty($val);
+        }
+        return false;
+    };
 
-    if ($slugKey !== '') {
-        $y = $td[$slugKey] ?? null;
-        if (is_bool($y)) return $y;
-        if (is_array($y)) return !empty($y['done']);
+    if (isset($td[$topicKey]) && $check($td[$topicKey])) {
+        return true;
+    }
+
+    if ($slugKey !== '' && isset($td[$slugKey]) && $check($td[$slugKey])) {
+        return true;
     }
 
     return false;
-}
-
-function theory_mark_done(string $uid, string $topic): void {
-    $topicKey = trim($topic);
-    $slugKey  = $topicKey !== '' ? slugify_ua($topicKey) : '';
-
-    $patch = [
-        'theory_done' => [
-            $topicKey => true,
-        ]
-    ];
-
-    if ($slugKey !== '') {
-        $patch['theory_done'][$slugKey] = true;
-    }
-
-    // 🔥 головне — PATCH а не SET
-    if (function_exists('progress_user_patch')) {
-        progress_user_patch($uid, $patch);
-        return;
-    }
-
-    // fallback
-    $u = user_progress_get($uid);
-    if (!isset($u['theory_done']) || !is_array($u['theory_done'])) {
-        $u['theory_done'] = [];
-    }
-
-    $u['theory_done'][$topicKey] = true;
-    if ($slugKey !== '') {
-        $u['theory_done'][$slugKey] = true;
-    }
-
-    user_progress_set($uid, $u);
 }
 /** -------------------- Input topic -------------------- */
 $topic = (string)($_GET['topic'] ?? '');
