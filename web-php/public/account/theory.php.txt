@@ -197,42 +197,24 @@ function first_test_id_for_topic(string $topic): int {
 $firstTestId = first_test_id_for_topic($topic);
 
 function theory_mark_done(string $uid, string $topic): void {
-    $topicKey = trim($topic);
-    $slugKey  = $topicKey !== '' ? slugify_ua($topicKey) : '';
+    $uid = trim($uid);
+    $topic = trim($topic);
 
-    if ($topicKey === '') {
+    if ($uid === '' || $topic === '') {
         return;
     }
 
+    if (function_exists('progress_mark_theory_done')) {
+        progress_mark_theory_done($uid, $topic);
+        return;
+    }
+
+    // fallback тільки якщо немає progress_mark_theory_done
+    $topicKey = $topic;
+    $slugKey  = slugify_ua($topicKey);
     $now = gmdate('c');
 
-    if (function_exists('progress_user_get') && function_exists('progress_user_set')) {
-        $u = progress_user_get($uid);
-        if (!is_array($u)) {
-            $u = [];
-        }
-
-        if (!isset($u['theory_done']) || !is_array($u['theory_done'])) {
-            $u['theory_done'] = [];
-        }
-
-        $u['theory_done'][$topicKey] = [
-            'done' => true,
-            'done_at' => $now,
-        ];
-
-        if ($slugKey !== '') {
-            $u['theory_done'][$slugKey] = [
-                'done' => true,
-                'done_at' => $now,
-            ];
-        }
-
-        progress_user_set($uid, $u);
-        return;
-    }
-
-    $u = user_progress_get($uid);
+    $u = function_exists('progress_user_get') ? progress_user_get($uid) : user_progress_get($uid);
     if (!is_array($u)) {
         $u = [];
     }
@@ -255,7 +237,6 @@ function theory_mark_done(string $uid, string $topic): void {
 
     user_progress_set($uid, $u);
 }
-
 function theory_is_done(string $uid, string $topic): bool {
     if (function_exists('progress_user_get')) {
         $u = progress_user_get($uid);
