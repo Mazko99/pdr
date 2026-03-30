@@ -209,23 +209,32 @@ function theory_mark_done(string $uid, string $topic): void {
     $topicKey = trim($topic);
     $slugKey  = $topicKey !== '' ? slugify_ua($topicKey) : '';
 
-    if (function_exists('progress_user_get') && function_exists('progress_user_set')) {
-        $u = progress_user_get($uid);
-        if (!is_array($u)) $u = [];
-        if (!isset($u['theory_done']) || !is_array($u['theory_done'])) $u['theory_done'] = [];
+    $patch = [
+        'theory_done' => [
+            $topicKey => true,
+        ]
+    ];
 
-        if ($topicKey !== '') $u['theory_done'][$topicKey] = true;
-        if ($slugKey !== '')  $u['theory_done'][$slugKey]  = true;
+    if ($slugKey !== '') {
+        $patch['theory_done'][$slugKey] = true;
+    }
 
-        progress_user_set($uid, $u);
+    // 🔥 головне — PATCH а не SET
+    if (function_exists('progress_user_patch')) {
+        progress_user_patch($uid, $patch);
         return;
     }
 
+    // fallback
     $u = user_progress_get($uid);
-    if (!isset($u['theory_done']) || !is_array($u['theory_done'])) $u['theory_done'] = [];
+    if (!isset($u['theory_done']) || !is_array($u['theory_done'])) {
+        $u['theory_done'] = [];
+    }
 
-    if ($topicKey !== '') $u['theory_done'][$topicKey] = true;
-    if ($slugKey !== '')  $u['theory_done'][$slugKey]  = true;
+    $u['theory_done'][$topicKey] = true;
+    if ($slugKey !== '') {
+        $u['theory_done'][$slugKey] = true;
+    }
 
     user_progress_set($uid, $u);
 }
@@ -303,6 +312,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 /** -------------------- Done screen -------------------- */
 $doneFlag = (string)($_GET['done'] ?? '');
 $goTestId = (int)($_GET['go_test_id'] ?? 0);
+
+var_dump(user_progress_get($uid));
+exit;
 
 if ($doneFlag === '1') {
     $isDone = theory_is_done($uid, $topic);
@@ -387,8 +399,6 @@ if ($doneFlag === '1') {
   sendPing();
 })();
 </script>
-(function () {
-  var lastSentAt = 0;
 
   function sendPing() {
     if (document.visibilityState !== 'visible') return;
