@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/../../src/bootstrap.php';
+require_once __DIR__ . '/../../src/users_store.php';
 require_once __DIR__ . '/../../src/progress_store.php';
 require_once __DIR__ . '/../../src/activity_store.php';
 
@@ -197,6 +198,8 @@ if (!$uid) {
     header('Location: /login', true, 302);
     exit;
 }
+
+auth_refresh_access();
 
 $hasAccess = !empty($_SESSION['has_access']);
 if (!$hasAccess) {

@@ -838,9 +838,15 @@ $sessions = function_exists('sessions_list_for_user') ? sessions_list_for_user($
             </div>
 
             <div style="margin-top:14px; display:flex; gap:10px; flex-wrap:wrap;">
-              <a class="btn btn--primary" href="/#pricing">Змінити тариф</a>
-              <a class="btn btn--ghost" href="#">Скасувати підписку</a>
-            </div>
+  <a class="btn btn--primary" href="/#pricing">Змінити тариф</a>
+
+  <?php if ($isActive): ?>
+    <form method="post" action="/account/cancel_subscribe.php" style="display:inline;">
+      <input type="hidden" name="csrf" value="<?= h(csrf_token()) ?>">
+      <button class="btn btn--ghost" type="submit">Скасувати підписку</button>
+    </form>
+  <?php endif; ?>
+</div>
           </div>
         </div>
 

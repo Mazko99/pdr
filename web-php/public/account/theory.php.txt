@@ -145,7 +145,8 @@ function user_progress_set(string $uid, array $u): void {
 $topic = trim((string)($_GET['topic'] ?? ''));
 $goTestId = (int)($_GET['go_test_id'] ?? 0);
 
-// ✅ натиснули "Перейти до тестування" => підтверджуємо теорію
+// ✅ якщо theory підтверджено через done=1 — просто залишаємось на сторінці підтвердження,
+// а запуск тесту робимо вже кнопкою через POST у done-screen
 if ($uid !== '' && $topic !== '' && (string)($_GET['done'] ?? '') === '1') {
     $topicKey = $topic;
     $slugKey  = slugify_ua($topicKey);
@@ -153,26 +154,28 @@ if ($uid !== '' && $topic !== '' && (string)($_GET['done'] ?? '') === '1') {
     if (function_exists('progress_user_get') && function_exists('progress_user_set')) {
         $u = progress_user_get($uid);
         if (!is_array($u)) $u = [];
-        if (!isset($u['theory_done']) || !is_array($u['theory_done'])) $u['theory_done'] = [];
+        if (!isset($u['theory_done']) || !is_array($u['theory_done'])) {
+            $u['theory_done'] = [];
+        }
 
         $u['theory_done'][$topicKey] = true;
-        if ($slugKey !== '') $u['theory_done'][$slugKey] = true;
+        if ($slugKey !== '') {
+            $u['theory_done'][$slugKey] = true;
+        }
 
         progress_user_set($uid, $u);
     } else {
         $u = user_progress_get($uid);
-        if (!isset($u['theory_done']) || !is_array($u['theory_done'])) $u['theory_done'] = [];
+        if (!isset($u['theory_done']) || !is_array($u['theory_done'])) {
+            $u['theory_done'] = [];
+        }
 
         $u['theory_done'][$topicKey] = true;
-        if ($slugKey !== '') $u['theory_done'][$slugKey] = true;
+        if ($slugKey !== '') {
+            $u['theory_done'][$slugKey] = true;
+        }
 
         user_progress_set($uid, $u);
-    }
-
-    if ($goTestId > 0) {
-        redirect('/account/quiz.php?mode=test&test_id=' . $goTestId);
-    } else {
-        redirect('/account/tests.php');
     }
 }
 
@@ -283,10 +286,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = (string)($_POST['action'] ?? '');
     if ($action === 'confirm') {
         theory_mark_done($uid, $topic);
+
         $targetTestId = $goTestId > 0 ? $goTestId : $firstTestId;
 
         $qs = 'topic=' . rawurlencode($topic) . '&done=1';
-        if ($targetTestId > 0) $qs .= '&go_test_id=' . $targetTestId;
+        if ($targetTestId > 0) {
+            $qs .= '&go_test_id=' . (int)$targetTestId;
+        }
 
         redirect('/account/theory.php?' . $qs);
     }
@@ -380,7 +386,7 @@ if ($doneFlag === '1') {
   window.addEventListener('focus', sendPing);
   sendPing();
 })();
-<script>
+</script>
 (function () {
   var lastSentAt = 0;
 
@@ -464,7 +470,7 @@ $isDone = theory_is_done($uid, $topic);
             <a class="btn2" href="/account/tests.php">← Назад до тестів</a>
             <a class="btn2" href="/account/index.php">В кабінет</a>
 
-            <form method="post" action="/account/theory.php?topic=<?= h(rawurlencode($topic)) ?>&go_test_id=<?= (int)$goTestId ?>" style="margin:0">
+            <form method="post" action="/account/theory.php?topic=<?= h(rawurlencode($topic)) ?>&go_test_id=<?= (int)($goTestId > 0 ? $goTestId : $firstTestId) ?>" style="margin:0">
                 <input type="hidden" name="csrf" value="<?= h($csrf) ?>">
                 <input type="hidden" name="action" value="confirm">
                 <button class="btn" type="submit">Ознайомлений</button>
