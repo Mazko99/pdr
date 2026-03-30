@@ -262,40 +262,50 @@ function first_test_id_for_topic(string $topic): int {
 
 $firstTestId = first_test_id_for_topic($topic);
 
-function theory_mark_done(string $uid, string $topic): void {
+function theory_is_done(string $uid, string $topic): bool {
+    if (function_exists('progress_user_get')) {
+        $u = progress_user_get($uid);
+    } else {
+        $u = user_progress_get($uid);
+    }
+
+    if (!is_array($u)) {
+        return false;
+    }
+
+    $td = $u['theory_done'] ?? [];
+    if (!is_array($td)) {
+        return false;
+    }
+
     $topicKey = trim($topic);
     $slugKey  = $topicKey !== '' ? slugify_ua($topicKey) : '';
-    if ($topicKey === '') return;
 
-    $u = function_exists('progress_user_get') ? progress_user_get($uid) : user_progress_get($uid);
-    if (!is_array($u)) $u = [];
+    $check = static function ($val): bool {
+        if (is_bool($val)) {
+            return $val;
+        }
 
-    if (!isset($u['theory_done']) || !is_array($u['theory_done'])) {
-        $u['theory_done'] = [];
+        if (is_array($val)) {
+            if (isset($val['done'])) {
+                return (bool)$val['done'];
+            }
+            return !empty($val);
+        }
+
+        return false;
+    };
+
+    if ($topicKey !== '' && isset($td[$topicKey]) && $check($td[$topicKey])) {
+        return true;
     }
 
-    $now = gmdate('c');
-
-    $u['theory_done'][$topicKey] = [
-        'done' => true,
-        'done_at' => $now,
-    ];
-
-    if ($slugKey !== '') {
-        $u['theory_done'][$slugKey] = [
-            'done' => true,
-            'done_at' => $now,
-        ];
+    if ($slugKey !== '' && isset($td[$slugKey]) && $check($td[$slugKey])) {
+        return true;
     }
 
-    if (function_exists('progress_user_set')) {
-        progress_user_set($uid, $u);
-        return;
-    }
-
-    user_progress_set($uid, $u);
+    return false;
 }
-
 /** -------------------- POST: confirm theory -------------------- */
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     csrf_verify($_POST['csrf'] ?? null);
