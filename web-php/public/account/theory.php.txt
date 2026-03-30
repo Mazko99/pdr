@@ -262,6 +262,40 @@ function first_test_id_for_topic(string $topic): int {
 
 $firstTestId = first_test_id_for_topic($topic);
 
+function theory_mark_done(string $uid, string $topic): void {
+    $topicKey = trim($topic);
+    $slugKey  = $topicKey !== '' ? slugify_ua($topicKey) : '';
+    if ($topicKey === '') return;
+
+    $u = function_exists('progress_user_get') ? progress_user_get($uid) : user_progress_get($uid);
+    if (!is_array($u)) $u = [];
+
+    if (!isset($u['theory_done']) || !is_array($u['theory_done'])) {
+        $u['theory_done'] = [];
+    }
+
+    $now = gmdate('c');
+
+    $u['theory_done'][$topicKey] = [
+        'done' => true,
+        'done_at' => $now,
+    ];
+
+    if ($slugKey !== '') {
+        $u['theory_done'][$slugKey] = [
+            'done' => true,
+            'done_at' => $now,
+        ];
+    }
+
+    if (function_exists('progress_user_set')) {
+        progress_user_set($uid, $u);
+        return;
+    }
+
+    user_progress_set($uid, $u);
+}
+
 /** -------------------- POST: confirm theory -------------------- */
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     csrf_verify($_POST['csrf'] ?? null);
