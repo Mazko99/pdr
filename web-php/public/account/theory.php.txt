@@ -180,11 +180,8 @@ if ($uid !== '' && $topic !== '' && (string)($_GET['done'] ?? '') === '1') {
 }
 
 function theory_is_done(string $uid, string $topic): bool {
-    if (function_exists('progress_user_get')) {
-        $u = progress_user_get($uid);
-    } else {
-        $u = user_progress_get($uid);
-    }
+    $u = function_exists('progress_user_get') ? progress_user_get($uid) : user_progress_get($uid);
+    if (!is_array($u)) $u = [];
 
     $td = $u['theory_done'] ?? [];
     if (!is_array($td)) return false;
@@ -192,21 +189,24 @@ function theory_is_done(string $uid, string $topic): bool {
     $topicKey = trim($topic);
     $slugKey  = $topicKey !== '' ? slugify_ua($topicKey) : '';
 
-    // 🔥 ФУНКЦІЯ перевірки
-    $check = function ($val) {
+    $check = static function ($val): bool {
         if (is_bool($val)) return $val;
+
         if (is_array($val)) {
-            if (isset($val['done'])) return (bool)$val['done'];
+            if (array_key_exists('done', $val)) {
+                return (bool)$val['done'];
+            }
             return !empty($val);
         }
+
         return false;
     };
 
-    if (isset($td[$topicKey]) && $check($td[$topicKey])) {
+    if ($topicKey !== '' && array_key_exists($topicKey, $td) && $check($td[$topicKey])) {
         return true;
     }
 
-    if ($slugKey !== '' && isset($td[$slugKey]) && $check($td[$slugKey])) {
+    if ($slugKey !== '' && array_key_exists($slugKey, $td) && $check($td[$slugKey])) {
         return true;
     }
 
@@ -286,9 +286,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 /** -------------------- Done screen -------------------- */
 $doneFlag = (string)($_GET['done'] ?? '');
 $goTestId = (int)($_GET['go_test_id'] ?? 0);
-
-var_dump(user_progress_get($uid));
-exit;
 
 if ($doneFlag === '1') {
     $isDone = theory_is_done($uid, $topic);
