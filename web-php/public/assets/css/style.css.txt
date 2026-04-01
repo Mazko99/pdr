@@ -1953,3 +1953,93 @@ button.pp-btn--darkfix:active{
     height: 240px !important;
   }
 }
+/* ===== Theory docs ===== */
+
+.theory-wrap {
+  max-width: 920px;
+  margin: 0 auto;
+  padding: 24px;
+  background: #ffffff;
+  border-radius: 20px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.06);
+}
+
+.theory-content {
+  font-size: 18px;
+  line-height: 1.8;
+  color: #111827;
+  text-align: justify;
+  word-break: break-word;
+}
+
+.theory-content p {
+  margin: 0 0 18px;
+}
+
+.theory-content h1,
+.theory-content h2,
+.theory-content h3 {
+  margin: 0 0 18px;
+  line-height: 1.3;
+  color: #0f172a;
+}
+
+.theory-content h1 {
+  font-size: 32px;
+}
+
+.theory-content h2 {
+  font-size: 26px;
+}
+
+.theory-content h3 {
+  font-size: 22px;
+}
+
+.theory-image {
+  margin: 24px 0;
+  text-align: center;
+}
+
+.theory-image img {
+  max-width: 100%;
+  height: auto;
+  display: inline-block;
+  border-radius: 16px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+}
+
+.theory-content a {
+  color: #2563eb;
+  text-decoration: underline;
+}
+
+.theory-content ul,
+.theory-content ol {
+  margin: 0 0 18px 24px;
+}
+
+@media (max-width: 768px) {
+  .theory-wrap {
+    padding: 16px;
+    border-radius: 16px;
+  }
+
+  .theory-content {
+    font-size: 16px;
+    line-height: 1.7;
+    text-align: left;
+  }
+
+  .theory-content h1 {
+    font-size: 26px;
+  }
+
+  .theory-content h2 {
+    font-size: 22px;
+  }
+
+  .theory-content h3 {
+    font-size: 19px;
+  }
+}
