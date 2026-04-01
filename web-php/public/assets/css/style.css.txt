@@ -2043,3 +2043,18 @@ button.pp-btn--darkfix:active{
     font-size: 19px;
   }
 }
+.theory-inline-image{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  vertical-align:-0.22em;
+  margin:0 6px;
+  line-height:1;
+}
+
+.theory-inline-image img{
+  display:block;
+  width:auto;
+  height:1.1em;
+  max-height:none;
+}
