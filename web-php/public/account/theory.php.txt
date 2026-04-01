@@ -496,7 +496,7 @@ $isDone = theory_is_done($uid, $topic);
         .sub{margin-top:6px;opacity:.75;font-weight:700}
         .pill{display:inline-flex;align-items:center;gap:8px;background:#f1f3f7;border-radius:999px;padding:8px 12px;font-weight:900;margin-top:12px}
         .ok{color:#0a7a3d}
-        .text{margin-top:14px;line-height:1.55;font-size:16px;white-space:pre-wrap}
+        .text{margin-top:14px;line-height:1.55;font-size:16px}
         .actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px}
         .btn{display:inline-block;padding:12px 14px;border-radius:14px;background:#0e2d23;color:#fff;text-decoration:none;font-weight:900;border:0;cursor:pointer}
         .btn2{display:inline-block;padding:12px 14px;border-radius:14px;background:#f1f3f7;color:#111;text-decoration:none;font-weight:900}
