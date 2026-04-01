@@ -502,6 +502,21 @@ $isDone = theory_is_done($uid, $topic);
         .btn2{display:inline-block;padding:12px 14px;border-radius:14px;background:#f1f3f7;color:#111;text-decoration:none;font-weight:900}
         .warn{opacity:.75}
         code{background:#f1f3f7;padding:2px 6px;border-radius:8px}
+        .text.theory-content p .theory-inline-image{
+            display:inline !important;
+            margin:0 4px !important;
+            line-height:inherit !important;
+        }
+
+        .text.theory-content p .theory-inline-image img{
+            display:inline-block !important;
+            width:auto !important;
+            height:1em !important;
+            max-height:none !important;
+            vertical-align:middle !important;
+            position:relative !important;
+            top:0.10em !important;
+        }
     </style>
 </head>
 <body>
