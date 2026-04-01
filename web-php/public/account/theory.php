@@ -511,11 +511,11 @@ $isDone = theory_is_done($uid, $topic);
         .text.theory-content p .theory-inline-image img{
             display:inline-block !important;
             width:auto !important;
-            height:1em !important;
+            height:22px !important;
             max-height:none !important;
             vertical-align:middle !important;
             position:relative !important;
-            top:0.10em !important;
+            top:0.01em !important;
         }
     </style>
 </head>
