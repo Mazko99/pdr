@@ -2044,14 +2044,16 @@ button.pp-btn--darkfix:active{
   }
 }
 .theory-inline-image{
-  display:inline;
+  display:inline-block;
   margin:0 4px;
+  line-height:0;
 }
 
 .theory-inline-image img{
   display:inline-block;
   width:auto;
   height:1em;
-  vertical-align:middle;
-  transform:translateY(0.08em);
+  vertical-align:-0.18em;
+  position:relative;
+  top:0.08em;
 }
