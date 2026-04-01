@@ -396,6 +396,88 @@ if ($doneFlag === '1') {
     <?php
     exit;
 }
+function theory_render_inline_markup(string $text): string {
+    $safe = htmlspecialchars($text, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+
+    $safe = preg_replace_callback(
+        '/\[image:(.*?)\]/u',
+        function ($m) {
+            $value = trim(html_entity_decode((string)$m[1], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'));
+            if ($value === '') {
+                return '';
+            }
+
+            if (strpos($value, '/assets/') === 0) {
+                $src = $value;
+            } else {
+                $src = '/assets/questions/' . basename($value);
+            }
+
+            $src = htmlspecialchars($src, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+
+            return '<span class="theory-inline-image"><img src="' . $src . '" alt=""></span>';
+        },
+        $safe
+    );
+
+    $safe = preg_replace_callback(
+        '/\[link:(.*?)\|(.*?)\]/u',
+        function ($m) {
+            $href  = trim(html_entity_decode((string)$m[1], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'));
+            $label = trim(html_entity_decode((string)$m[2], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'));
+
+            if ($href === '' || $label === '') {
+                return '';
+            }
+
+            $safeHref  = htmlspecialchars($href, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+            $safeLabel = htmlspecialchars($label, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+
+            return '<a href="' . $safeHref . '" target="_blank" rel="noopener noreferrer">' . $safeLabel . '</a>';
+        },
+        $safe
+    );
+
+    return nl2br($safe);
+}
+
+function theory_render_html(string $text): string {
+    $text = str_replace(["\r\n", "\r"], "\n", $text);
+    $parts = preg_split('/\n{2,}/u', trim($text));
+
+    if (!is_array($parts) || !$parts) {
+        return '<p>' . theory_render_inline_markup($text) . '</p>';
+    }
+
+    $html = '';
+
+    foreach ($parts as $part) {
+        $part = trim((string)$part);
+        if ($part === '') {
+            continue;
+        }
+
+        if (preg_match('/^\[image:(.*?)\]$/u', $part, $m)) {
+            $value = trim((string)$m[1]);
+
+            if ($value !== '') {
+                if (strpos($value, '/assets/') === 0) {
+                    $src = $value;
+                } else {
+                    $src = '/assets/questions/' . basename($value);
+                }
+
+                $html .= '<div class="theory-image"><img src="' . h($src) . '" alt=""></div>';
+            }
+
+            continue;
+        }
+
+        $html .= '<p>' . theory_render_inline_markup($part) . '</p>';
+    }
+
+    return $html;
+}
 /** -------------------- Normal theory page -------------------- */
 $isDone = theory_is_done($uid, $topic);
 ?>
@@ -437,7 +519,7 @@ $isDone = theory_is_done($uid, $topic);
                 Очікуваний файл: <code><?= h($theoryFile) ?></code>
             </div>
         <?php else: ?>
-            <div class="text"><?= h($theoryText) ?></div>
+            <div class="text theory-content"><?= theory_render_html($theoryText) ?></div>
         <?php endif; ?>
 
         <div class="actions">
