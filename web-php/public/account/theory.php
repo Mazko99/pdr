@@ -487,6 +487,7 @@ $isDone = theory_is_done($uid, $topic);
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title><?= h($topic) ?> — Теорія</title>
+    <link rel="stylesheet" href="/assets/css/style.css?v=10">
     <style>
         body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;background:#fff}
         .wrap{max-width:1100px;margin:0 auto;padding:46px 16px 64px}
