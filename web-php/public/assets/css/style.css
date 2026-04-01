@@ -2047,7 +2047,7 @@ button.pp-btn--darkfix:active{
   display:inline-flex;
   align-items:center;
   justify-content:center;
-  vertical-align:-0.22em;
+  vertical-align:-0.35em;
   margin:0 6px;
   line-height:1;
 }
