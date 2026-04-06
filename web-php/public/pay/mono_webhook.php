@@ -233,24 +233,26 @@ if ($mode === 'trial' || $mode === 'trial_charge') {
 if ($mode === 'buy') {
     $chosen = $plan !== '' ? $plan : (string)($u['buy_pending_plan'] ?? 'basic');
     $chosen = norm_plan($chosen);
-    if ($chosen !== 'mini12' && $chosen !== 'basic') {
+
+    if (!in_array($chosen, ['basic', 'mini12'], true)) {
         $chosen = 'basic';
     }
 
     $days = ($chosen === 'mini12') ? 12 : 30;
+    $nowIso = gmdate('c');
 
     $u['plan'] = $chosen;
+    $u['paid_at'] = $nowIso;
     $u['expires_at'] = gmdate('c', time() + $days * 86400);
-    $u['paid_at'] = gmdate('c');
-    $u['plan_set_at'] = gmdate('c');
-    $u['mono_last_payment_at'] = gmdate('c');
-
+    $u['plan_set_at'] = $nowIso;
+    $u['mono_last_payment_at'] = $nowIso;
     $u['buy_pending_invoice'] = null;
     $u['buy_pending_plan'] = null;
 
     user_upsert($u);
 
-    log_line("BUY OK -> plan={$u['plan']} expires_at={$u['expires_at']}");
+    log_line("BUY APPLIED userId={$userId} plan={$chosen} expires_at={$u['expires_at']}");
+
     http_response_code(200);
     echo 'ok';
     exit;

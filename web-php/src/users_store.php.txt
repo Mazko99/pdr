@@ -119,7 +119,7 @@ function row_to_user(array $row): array {
 
   $p = strtolower(trim((string)$u['plan']));
   if ($p === '' || $p === 'null') $p = 'free';
-  if (!in_array($p, ['free', 'basic', 'personal', 'dev'], true)) $p = 'free';
+  if (!in_array($p, ['free', 'basic', 'mini12', 'dev', 'admin'], true)) $p = 'free';
   $u['plan'] = $p;
 
   return $u;
@@ -215,7 +215,7 @@ function user_upsert(array $u): array {
 
   $plan = strtolower(trim((string)($u['plan'] ?? 'free')));
   if ($plan === '' || $plan === 'null') $plan = 'free';
-  if (!in_array($plan, ['free', 'basic', 'personal', 'dev'], true)) $plan = 'free';
+  if (!in_array($plan, ['free', 'basic', 'mini12', 'dev', 'admin'], true)) $plan = 'free';
 
   $expiresAt = $u['expires_at'] ?? null;
   $paidAt    = $u['paid_at'] ?? null;
@@ -303,15 +303,25 @@ function user_delete(int|string $id): bool {
 }
 
 function user_has_access(array $user, ?int $nowTs = null): bool {
-  $plan = strtolower((string)($user['plan'] ?? 'free'));
-  if ($plan === 'dev') return true;
-  if ($plan !== 'basic' && $plan !== 'personal') return false;
+  $plan = strtolower(trim((string)($user['plan'] ?? 'free')));
+
+  if ($plan === 'dev' || $plan === 'admin') {
+    return true;
+  }
+
+  if (!in_array($plan, ['basic', 'mini12'], true)) {
+    return false;
+  }
 
   $exp = $user['expires_at'] ?? null;
-  if ($exp === null || $exp === '' || $exp === 'null') return true;
+  if ($exp === null || $exp === '' || $exp === 'null') {
+    return false;
+  }
 
   $ts = strtotime((string)$exp);
-  if ($ts === false) return true;
+  if ($ts === false) {
+    return false;
+  }
 
   $now = $nowTs ?? time();
   return $ts > $now;

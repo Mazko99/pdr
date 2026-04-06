@@ -19,8 +19,8 @@ if (!$uid) redirect('/login');
 
 $plan = strtolower(trim((string)($_POST['plan'] ?? '')));
 
-// ✅ узгоджуємо з mono_webhook.php: base | 12d
-$allowed = ['base', '12d'];
+// ✅ єдині коди тарифів у всьому проекті
+$allowed = ['basic', 'mini12'];
 if (!in_array($plan, $allowed, true)) {
   http_response_code(400);
   echo "Некоректний plan.";
@@ -33,10 +33,15 @@ if (!$user) {
   redirect('/login');
 }
 
-$user['plan'] = $plan;
-$user['paid_at'] = $user['paid_at'] ?? gmdate('c');
+$days = ($plan === 'mini12') ? 12 : 30;
+$nowIso = gmdate('c');
 
-$days = ($plan === '12d') ? 12 : 30;
+$user['plan'] = $plan;
+$user['paid_at'] = $nowIso;
+$user['plan_set_at'] = $nowIso;
+$user['mono_last_payment_at'] = $nowIso;
+$user['buy_pending_plan'] = null;
+$user['buy_pending_invoice'] = null;
 $user['expires_at'] = gmdate('c', time() + $days * 86400);
 
 user_upsert($user);

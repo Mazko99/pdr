@@ -80,34 +80,6 @@ require_once __DIR__ . '/db.php';
 $ss = __DIR__ . '/sessions_store.php';
 if (is_file($ss)) require_once $ss;
 
-function db(): PDO {
-
-    static $pdo = null;
-
-    if ($pdo) return $pdo;
-
-    $url = getenv('DATABASE_URL');
-
-    if (!$url) {
-        throw new Exception('DATABASE_URL not set');
-    }
-
-    $parts = parse_url($url);
-
-    $host = $parts['host'];
-    $port = $parts['port'];
-    $user = $parts['user'];
-    $pass = $parts['pass'];
-    $db   = ltrim($parts['path'], '/');
-
-    $dsn = "pgsql:host=$host;port=$port;dbname=$db";
-
-    $pdo = new PDO($dsn, $user, $pass, [
-        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION
-    ]);
-
-    return $pdo;
-}
 // -------------------- Helpers --------------------
 function env(string $key, ?string $default = null): ?string {
   $v = getenv($key);

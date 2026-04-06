@@ -105,8 +105,7 @@ $planTitles = [
   'basic'  => 'Базовий (30 днів / підписка)',
   'mini12' => 'План на 12 днів',
   'dev'    => 'Dev',
-  '12d'    => 'План на 12 днів',
-  'base'   => 'Базовий (30 днів / підписка)',
+  'admin'  => 'Admin',
 ];
 
 $expiresText = '—';
@@ -534,7 +533,7 @@ $sessions = function_exists('sessions_list_for_user') ? sessions_list_for_user($
             <form method="post" action="/pay/create.php" style="display:inline;">
               <input type="hidden" name="csrf" value="<?= h(csrf_token()) ?>">
               <input type="hidden" name="action" value="buy">
-              <input type="hidden" name="plan" value="30">
+              <input type="hidden" name="plan" value="basic">
               <button class="btn btn--primary plan__cta" type="submit">Обрати</button>
             </form>
           </div>
@@ -570,7 +569,7 @@ $sessions = function_exists('sessions_list_for_user') ? sessions_list_for_user($
             <form method="post" action="/pay/create.php" style="display:inline;">
               <input type="hidden" name="csrf" value="<?= h(csrf_token()) ?>">
               <input type="hidden" name="action" value="buy">
-              <input type="hidden" name="plan" value="12">
+              <input type="hidden" name="plan" value="mini12">
               <button class="btn btn--primary plan__cta" type="submit">Обрати</button>
             </form>
           </div>
