@@ -45,8 +45,8 @@ $mode = ($modeRaw === 'trial') ? 'trial' : 'buy';
 $plan = norm_checkout_plan($planRaw);
 
 $PRICE = [
-    'basic'  => 10,
-    'mini12' => 10,
+    'basic'  => 69900,
+    'mini12' => 38999,
 ];
 
 $app = mono_app_url();
