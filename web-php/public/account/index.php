@@ -569,7 +569,7 @@ $sessions = function_exists('sessions_list_for_user') ? sessions_list_for_user($
             <form method="post" action="/pay/create.php" style="display:inline;">
               <input type="hidden" name="csrf" value="<?= h(csrf_token()) ?>">
               <input type="hidden" name="action" value="buy">
-              <input type="hidden" name="plan" value="mini12">
+              <input type="hidden" name="plan" value="12">
               <button class="btn btn--primary plan__cta" type="submit">Обрати</button>
             </form>
           </div>
