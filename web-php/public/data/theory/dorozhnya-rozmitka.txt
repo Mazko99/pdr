@@ -2,9 +2,9 @@
 
 34.1 Горизонтальна розмітка
 
-Лінії горизонтальної розмітки мають білий колір. Синій колір має лінія . Жовтий колір мають лінії ,  - ,  - , , , а також лінії тимчасової розмітки. Червоно-білий колір мають лінії , ,.
+Лінії горизонтальної розмітки мають білий колір. Синій колір має лінія [image:/assets/questions/2193.png] . Жовтий колір мають лінії [image:/assets/questions/2194.png],  [image:/assets/questions/2195.png]-[image:/assets/questions/2196.png] , [image:/assets/questions/2197.png] -[image:/assets/questions/2198.png] [image:/assets/questions/2199.png], [image:/assets/questions/2200.png], [image:/assets/questions/2201.png], а також лінії тимчасової розмітки. Червоно-білий колір мають лінії [image:/assets/questions/2203.png], [image:/assets/questions/2204.png],[image:/assets/questions/2205.png].
 
-Розмітка  -  дублює зображення знаків.
+Розмітка [image:/assets/questions/2206.png] - [image:/assets/questions/2207.png] дублює зображення знаків.
 
 Детальніше про горизонтальну розмітку
 
@@ -12,8 +12,6 @@
 
 Смуги вертикальної розмітки мають чорно-білий, жовто-червоний та червоно-білий кольори.
 
-Чорно-білий колір має розмітка  - , , , , , .
+Чорно-білий колір має розмітка  [image:/assets/questions/2208.png]-[image:/assets/questions/2209.png] , [image:/assets/questions/2210.png], [image:/assets/questions/2211.png], [image:/assets/questions/2212.png], [image:/assets/questions/2213.png], [image:/assets/questions/2214.png].
 
-Жовто-червоний колір має розмітка  -  та . Червоно-білий колір мають смуги  -.
-
-Детальніше про вертикальну розмітку
+Жовто-червоний колір має розмітка [image:/assets/questions/2215.png] - [image:/assets/questions/2216.png] та [image:/assets/questions/2217.png]. Червоно-білий колір мають смуги [image:/assets/questions/2218.png] - [image:/assets/questions/2219.png].
