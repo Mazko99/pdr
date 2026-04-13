@@ -1,2 +1,2 @@
-[image:/assets/questions/3000.png]
-[image:/assets/questions/3001.png]
+[image_big:/assets/questions/3000.png]
+[image_big:/assets/questions/3001.png]
