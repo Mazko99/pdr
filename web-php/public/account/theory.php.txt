@@ -400,6 +400,27 @@ function theory_render_inline_markup(string $text): string {
     $safe = htmlspecialchars($text, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
 
     $safe = preg_replace_callback(
+        '/\[image_big:(.*?)\]/u',
+        function ($m) {
+            $value = trim(html_entity_decode((string)$m[1], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'));
+            if ($value === '') {
+                return '';
+            }
+
+            if (strpos($value, '/assets/') === 0) {
+                $src = $value;
+            } else {
+                $src = '/assets/questions/' . basename($value);
+            }
+
+            $src = htmlspecialchars($src, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+
+            return '<span class="theory-inline-image theory-inline-image--big"><img src="' . $src . '" alt=""></span>';
+        },
+        $safe
+    );
+
+    $safe = preg_replace_callback(
         '/\[image:(.*?)\]/u',
         function ($m) {
             $value = trim(html_entity_decode((string)$m[1], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'));
@@ -454,6 +475,22 @@ function theory_render_html(string $text): string {
     foreach ($parts as $part) {
         $part = trim((string)$part);
         if ($part === '') {
+            continue;
+        }
+
+        if (preg_match('/^\[image_big:(.*?)\]$/u', $part, $m)) {
+            $value = trim((string)$m[1]);
+
+            if ($value !== '') {
+                if (strpos($value, '/assets/') === 0) {
+                    $src = $value;
+                } else {
+                    $src = '/assets/questions/' . basename($value);
+                }
+
+                $html .= '<div class="theory-image theory-image--big"><img src="' . h($src) . '" alt=""></div>';
+            }
+
             continue;
         }
 

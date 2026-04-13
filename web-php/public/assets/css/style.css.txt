@@ -2057,3 +2057,36 @@ button.pp-btn--darkfix:active{
   position:relative;
   top:0.08em;
 }
+        .text.theory-content .theory-image{
+            margin:16px 0;
+            text-align:center;
+        }
+
+        .text.theory-content .theory-image img{
+            display:block;
+            max-width:100%;
+            height:auto;
+            margin:0 auto;
+            border-radius:12px;
+        }
+
+        .text.theory-content .theory-image--big img{
+            width:100%;
+            max-width:900px;
+            height:auto;
+        }
+
+        .text.theory-content p .theory-inline-image--big{
+            display:block !important;
+            margin:16px auto !important;
+            text-align:center !important;
+        }
+
+        .text.theory-content p .theory-inline-image--big img{
+            display:block !important;
+            width:100% !important;
+            max-width:900px !important;
+            height:auto !important;
+            margin:0 auto !important;
+            border-radius:12px !important;
+        }
