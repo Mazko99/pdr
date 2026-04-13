@@ -554,6 +554,51 @@ $isDone = theory_is_done($uid, $topic);
             position:relative !important;
             top:0em !important;
         }
+        .theory-content .theory-image--big,
+.text.theory-content .theory-image--big{
+    display:block !important;
+    width:100% !important;
+    max-width:100% !important;
+    margin:18px 0 !important;
+    text-align:center !important;
+}
+
+.theory-content .theory-image--big img,
+.text.theory-content .theory-image--big img{
+    display:block !important;
+    width:900px !important;
+    max-width:100% !important;
+    height:auto !important;
+    max-height:none !important;
+    min-height:unset !important;
+    margin:0 auto !important;
+    border-radius:12px !important;
+    object-fit:contain !important;
+}
+
+.theory-content p .theory-inline-image--big,
+.text.theory-content p .theory-inline-image--big{
+    display:block !important;
+    width:100% !important;
+    margin:18px 0 !important;
+    text-align:center !important;
+    line-height:normal !important;
+}
+
+.theory-content p .theory-inline-image--big img,
+.text.theory-content p .theory-inline-image--big img{
+    display:block !important;
+    width:900px !important;
+    max-width:100% !important;
+    height:auto !important;
+    max-height:none !important;
+    min-height:unset !important;
+    top:auto !important;
+    position:static !important;
+    margin:0 auto !important;
+    border-radius:12px !important;
+    object-fit:contain !important;
+}
     </style>
 </head>
 <body>
