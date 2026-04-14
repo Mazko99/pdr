@@ -1969,7 +1969,10 @@ button.pp-btn--darkfix:active{
   line-height: 1.8;
   color: #111827;
   text-align: justify;
-  word-break: break-word;
+  text-align-last: left;
+  overflow-wrap: break-word;
+  word-break: normal;
+  hyphens: auto;
 }
 
 .theory-content p {
@@ -2027,9 +2030,15 @@ button.pp-btn--darkfix:active{
 
   .theory-content {
     font-size: 16px;
-    line-height: 1.7;
-    text-align: justify;
-    text-align-last: left;
+    line-height: 1.75;
+    text-align: left;
+    overflow-wrap: break-word;
+    word-break: normal;
+    hyphens: auto;
+  }
+
+  .theory-content p {
+    margin: 0 0 16px;
   }
 
   .theory-content h1 {
