@@ -2028,7 +2028,8 @@ button.pp-btn--darkfix:active{
   .theory-content {
     font-size: 16px;
     line-height: 1.7;
-    text-align: left;
+    text-align: justify;
+    text-align-last: left;
   }
 
   .theory-content h1 {
