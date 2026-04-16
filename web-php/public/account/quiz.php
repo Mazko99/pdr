@@ -23,6 +23,36 @@ require_once __DIR__ . '/../../src/activity_store.php';
 
 function h(string $s): string { return htmlspecialchars($s, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); }
 
+function quiz_normalize_image(?string $image): ?string {
+    if (!is_string($image)) return null;
+
+    $image = trim($image);
+    if ($image === '') return null;
+
+    // якщо в текст прилітає щось типу [image:/assets/questions/123.jpg]
+    if (preg_match('/^\[image:(.+)\]$/i', $image, $m)) {
+        $image = trim($m[1]);
+    }
+
+    // прибираємо пробіли
+    $image = preg_replace('/\s+/', '', $image);
+
+    if ($image === '') return null;
+
+    // дозволяємо тільки локальні картинки з /assets/
+    if (strpos($image, '/assets/') !== 0) {
+        return null;
+    }
+
+    $fullPath = $_SERVER['DOCUMENT_ROOT'] . $image;
+
+    if (!is_file($fullPath)) {
+        return null;
+    }
+
+    return $image;
+}
+
 function json_load_array(string $absPath): array {
     if (!is_file($absPath)) throw new RuntimeException("JSON file not found: {$absPath}");
     $raw = file_get_contents($absPath);
@@ -55,8 +85,7 @@ function questions_map(array $questions): array {
         if ($correct < 1 || $correct > count($q['options'])) continue;
 
         if (!array_key_exists('explain', $q) || !is_string($q['explain'])) $q['explain'] = '';
-        if (!array_key_exists('image', $q)) $q['image'] = null;
-        if ($q['image'] === '') $q['image'] = null;
+        $q['image'] = quiz_normalize_image(isset($q['image']) ? (string)$q['image'] : null);
 
         $opts = [];
         foreach ($q['options'] as $o) $opts[] = is_string($o) ? $o : (string)$o;
@@ -1395,9 +1424,10 @@ form button.pp-btn:disabled{
 
         <div class="pp-q"><?= h((string)$q['question']) ?></div>
 
-        <?php if (!empty($q['image']) && is_string($q['image'])): ?>
+        <?php $questionImage = quiz_normalize_image(isset($q['image']) ? (string)$q['image'] : null); ?>
+        <?php if ($questionImage !== null): ?>
             <div class="pp-img">
-                <img src="<?= h($q['image']) ?>" alt="Question image">
+                <img src="<?= h($questionImage) ?>" alt="Question image">
             </div>
         <?php endif; ?>
 
