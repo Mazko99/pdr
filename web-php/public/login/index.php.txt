@@ -252,14 +252,6 @@ $csrf = csrf_token();
         <div class="notice notice--ok"><?php echo htmlspecialchars($ok, ENT_QUOTES, 'UTF-8'); ?></div>
       <?php endif; ?>
 
-      <?php if ($pendingRefCode !== ''): ?>
-        <div class="notice notice--ref">
-          Ти перейшов за партнерським посиланням.
-          Код партнера: <strong><?php echo htmlspecialchars($pendingRefCode, ENT_QUOTES, 'UTF-8'); ?></strong>.
-          Після реєстрації акаунт буде прикріплено автоматично.
-        </div>
-      <?php endif; ?>
-
       <div class="auth-wrap">
         <section class="auth-card">
           <div class="tabs">
